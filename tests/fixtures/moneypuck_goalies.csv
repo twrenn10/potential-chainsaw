@@ -1,0 +1,5 @@
+playerId,season,name,gameId,playerTeam,opposingTeam,home_or_away,gameDate,position,situation,icetime,xGoals,goals,ongoal
+8479361,2025,A Goalie,2025020010,TOR,MTL,HOME,20251010,G,all,3600,2.6,2,29
+8478470,2025,B Goalie,2025020010,MTL,TOR,AWAY,20251010,G,all,2400,2.1,3,25
+8481519,2025,C Goalie,2025020010,MTL,TOR,AWAY,20251010,G,all,1200,0.9,0,8
+8481519,2025,C Goalie,2025020010,MTL,TOR,AWAY,20251010,G,5on5,1000,0.6,0,6

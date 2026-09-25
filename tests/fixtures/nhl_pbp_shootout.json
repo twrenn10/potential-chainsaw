@@ -1,0 +1,12 @@
+{"id":2026020001,"gameState":"OFF","startTimeUTC":"2026-10-07T23:00:00Z",
+ "homeTeam":{"id":10,"abbrev":"TOR","score":3},"awayTeam":{"id":8,"abbrev":"MTL","score":2},
+ "plays":[
+  {"eventId":1,"periodDescriptor":{"number":1,"periodType":"REG"},"timeInPeriod":"04:10","situationCode":"1551","typeDescKey":"shot-on-goal","details":{"eventOwnerTeamId":10,"shootingPlayerId":8479318,"goalieInNetId":8478470,"xCoord":70,"yCoord":5}},
+  {"eventId":2,"periodDescriptor":{"number":1,"periodType":"REG"},"timeInPeriod":"08:00","situationCode":"1451","typeDescKey":"goal","details":{"eventOwnerTeamId":10,"scoringPlayerId":8479318,"goalieInNetId":8478470}},
+  {"eventId":3,"periodDescriptor":{"number":1,"periodType":"REG"},"timeInPeriod":"10:00","situationCode":"1551","typeDescKey":"penalty","details":{"eventOwnerTeamId":8,"duration":2}},
+  {"eventId":4,"periodDescriptor":{"number":2,"periodType":"REG"},"timeInPeriod":"05:00","situationCode":"1551","typeDescKey":"goal","details":{"eventOwnerTeamId":8,"scoringPlayerId":8480018}},
+  {"eventId":5,"periodDescriptor":{"number":3,"periodType":"REG"},"timeInPeriod":"18:30","situationCode":"0651","typeDescKey":"goal","details":{"eventOwnerTeamId":8,"scoringPlayerId":8480018}},
+  {"eventId":6,"periodDescriptor":{"number":3,"periodType":"REG"},"timeInPeriod":"19:10","situationCode":"0651","typeDescKey":"goal","details":{"eventOwnerTeamId":10,"scoringPlayerId":8479318}},
+  {"eventId":7,"periodDescriptor":{"number":5,"periodType":"SO"},"timeInPeriod":"00:00","situationCode":"1010","typeDescKey":"goal","details":{"eventOwnerTeamId":10,"scoringPlayerId":8479318}},
+  {"eventId":8,"periodDescriptor":{"number":5,"periodType":"SO"},"timeInPeriod":"00:00","situationCode":"0101","typeDescKey":"missed-shot","details":{"eventOwnerTeamId":8}}
+ ]}

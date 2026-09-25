@@ -1,0 +1,5 @@
+{"id":2026020001,"homeTeam":{"id":10,"abbrev":"TOR"},"awayTeam":{"id":8,"abbrev":"MTL"},
+ "playerByGameStats":{
+  "homeTeam":{"goalies":[{"playerId":8479361,"starter":true,"toi":"65:00","saveShotsAgainst":"28/30","goalsAgainst":2}]},
+  "awayTeam":{"goalies":[{"playerId":8478470,"starter":true,"toi":"63:40","saveShotsAgainst":"31/33","goalsAgainst":2},
+                         {"playerId":8481519,"starter":false,"toi":"00:00","saveShotsAgainst":"0/0","goalsAgainst":0}]}}}

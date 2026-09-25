@@ -1,0 +1,5 @@
+team,season,name,gameId,playerTeam,opposingTeam,home_or_away,gameDate,position,situation,iceTime,xGoalsFor,xGoalsAgainst,goalsFor,goalsAgainst,shotsOnGoalFor,shotsOnGoalAgainst,penaltiesFor,penaltiesAgainst
+TOR,2025,TOR,2025020010,TOR,MTL,HOME,20251010,Team Level,5on5,2900,2.4,1.9,2,1,24,20,0,0
+TOR,2025,TOR,2025020010,TOR,MTL,HOME,20251010,Team Level,all,3600,3.3,2.6,3,2,33,29,3,4
+TOR,2025,TOR,2025020010,TOR,MTL,HOME,20251010,Team Level,other,100,0.1,0.1,0,0,1,1,0,0
+MTL,2025,MTL,2025020010,MTL,TOR,AWAY,20251010,Team Level,5on5,2900,1.9,2.4,1,2,20,24,0,0
