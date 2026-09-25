@@ -155,3 +155,11 @@ def test_price_slate_runs(league):
     again, _ = price_slate(view, day_games, r, n_sims=2000)
     assert [p.pricing.p_home_ml for p in priced] == [p.pricing.p_home_ml for p in again]
     assert all(p.n_scenarios >= 1 for p in priced)
+
+
+def test_state_goal_counters_are_consistent():
+    o = simulate([GameRates(avg_rates(), avg_rates())], 5000, 9)[0]
+    assert np.all(o.ev_h + o.pp_h + o.en_h <= o.reg_h)
+    assert o.en_h.sum() > 0 and o.pp_h.sum() > 0
+    # Most regulation goals are even strength.
+    assert 0.6 < o.ev_h.sum() / o.reg_h.sum() < 0.85

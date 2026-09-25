@@ -57,6 +57,13 @@ class SimOutcome:
     so_home_win: np.ndarray
     p1_h: np.ndarray
     p1_a: np.ndarray
+    # Regulation goals by state (for per-strength training data and diagnostics).
+    ev_h: np.ndarray | None = None
+    ev_a: np.ndarray | None = None
+    pp_h: np.ndarray | None = None
+    pp_a: np.ndarray | None = None
+    en_h: np.ndarray | None = None  # scored into an empty net
+    en_a: np.ndarray | None = None
 
     @property
     def home_win(self) -> np.ndarray:
@@ -80,11 +87,12 @@ def team_rates(
     cfg: dict,
 ) -> TeamRates:
     g_mult = ratings.goalie_mult(opp_goalie)
-    ev = ratings.ev_rate(team, opp, is_home, b2b, opp_b2b) * g_mult
-    strength = ev / (cfg["rate_5v5"] * g_mult)  # team-vs-opp strength relative to league, pre-goalie
+    xg_ev = ratings.ev_rate(team, opp, is_home, b2b, opp_b2b)
+    ev = xg_ev * ratings.goals_per_xg_5v5 * g_mult
+    strength = xg_ev / math.exp(ratings.mu_5v5)  # team-vs-opp strength relative to league, pre-goalie
     return TeamRates(
         ev=ev,
-        pp=ratings.pp_rate(team, opp) * g_mult,
+        pp=ratings.pp_rate(team, opp) * ratings.goals_per_xg_pp * g_mult,
         sh=cfg["rate_sh"] * g_mult,
         pen=ratings.pen_rate(team, opp),
         six_v_five=cfg["rate_6v5_attack"] * strength * g_mult,
@@ -117,6 +125,7 @@ def simulate(scenarios: list[GameRates], n_sims: int, seed: int, cfg: dict | Non
     ph = np.zeros(shape)  # home penalty time remaining
     pa = np.zeros(shape)
     p1_h = p1_a = None
+    ev_h, ev_a, pp_h, pp_a, en_h, en_a = (np.zeros(shape, dtype=np.int32) for _ in range(6))
     mult_44 = cfg["rate_4v4_mult"]
     cap = cfg["score_effect_cap"]
     pull1, pull2 = cfg["pull_trailing_by_1_seconds"], cfg["pull_trailing_by_2_seconds"]
@@ -159,6 +168,13 @@ def simulate(scenarios: list[GameRates], n_sims: int, seed: int, cfg: dict | Non
 
         sh += g_h
         sa += g_a
+        no_pull = ~pulled_h & ~pulled_a
+        ev_h += g_h & even & no_pull
+        ev_a += g_a & even & no_pull
+        pp_h += g_h & a_short & ~h_short & no_pull
+        pp_a += g_a & h_short & ~a_short & no_pull
+        en_h += g_h & pulled_a
+        en_a += g_a & pulled_h
         pa = np.where(g_h & a_short & ~h_short, 0.0, pa)  # PP goal ends the minor
         ph = np.where(g_a & h_short & ~a_short, 0.0, ph)
         ph = np.where(pen_h, float(cfg["minor_seconds"]), ph)
@@ -186,6 +202,7 @@ def simulate(scenarios: list[GameRates], n_sims: int, seed: int, cfg: dict | Non
                 fin_h=sh[i] + ot_home[i], fin_a=sa[i] + ot_away[i],
                 end_type=end_type[i], so_home_win=so_home[i],
                 p1_h=p1_h[i], p1_a=p1_a[i],
+                ev_h=ev_h[i], ev_a=ev_a[i], pp_h=pp_h[i], pp_a=pp_a[i], en_h=en_h[i], en_a=en_a[i],
             )
         )
     return out

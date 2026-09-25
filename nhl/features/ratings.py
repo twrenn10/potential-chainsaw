@@ -42,6 +42,7 @@ class FitConfig:
     pen_prior_sd: float = 0.10
     goalie_prior_sd: float = 0.06
     home_prior: tuple[float, float] = (0.035, 0.05)
+    goals_per_xg_pseudo_xg: float = 300.0  # shrink league xG->goals factor toward 1
     b2b_prior: tuple[float, float] = (0.0, 0.10)
     newton_iters: int = 25
 
@@ -61,7 +62,9 @@ class Ratings:
     mu_pen: float
     take: dict[str, float]
     draw: dict[str, float]
-    goalie: dict[str, float]
+    goalie: dict[str, float]  # relative to league (league intercept removed)
+    goals_per_xg_5v5: float = 1.0
+    goals_per_xg_pp: float = 1.0
     n_rows: dict[str, int] = field(default_factory=dict)
 
     def ev_rate(self, team: str, opp: str, is_home: bool, b2b: bool, opp_b2b: bool) -> float:
@@ -172,7 +175,18 @@ def fit_ratings(
         math.log(league["penalty_rate"]), cfg.pen_prior_sd, cfg,
     )
 
-    # ---- goalies: goals_against = xGA * exp(-g)
+    # ---- league goals-per-xG at 5v5 and PP (xG models drift by season)
+    def goals_per_xg(situation: str) -> float:
+        rs = [s for s in stats if s.situation == situation]
+        w = _decay(np.array([age(s.game_id) for s in rs]), cfg.half_life_days) if rs else np.zeros(0)
+        g = float(np.sum(w * np.array([s.goals_for for s in rs]))) if rs else 0.0
+        x = float(np.sum(w * np.array([s.xg_for for s in rs]))) if rs else 0.0
+        k = cfg.goals_per_xg_pseudo_xg
+        return (g + k) / (x + k)
+
+    k5, kpp = goals_per_xg("5on5"), goals_per_xg("5on4")
+
+    # ---- goalies: goals_against = xGA * exp(c - g_k); c = league intercept, g relative
     g_rows = [
         g for g in view.goalie_stats()
         if int(g.game_id[:4]) == season and g.xg_against > 0 and not math.isnan(g.xg_against)
@@ -180,18 +194,20 @@ def fit_ratings(
     ids = sorted({g.goalie_id for g in g_rows} | set(goalie_priors))
     goalie: dict[str, float] = {gid: goalie_priors[gid].g if gid in goalie_priors else 0.0 for gid in ids}
     if g_rows:
-        gi = {gid: i for i, gid in enumerate(ids)}
-        Xg = np.zeros((len(g_rows), len(ids)))
+        gi = {gid: i + 1 for i, gid in enumerate(ids)}
+        Xg = np.zeros((len(g_rows), len(ids) + 1))
         yg = np.zeros(len(g_rows))
         og = np.zeros(len(g_rows))
         ag = np.zeros(len(g_rows))
         for r, g in enumerate(g_rows):
+            Xg[r, 0] = 1.0
             Xg[r, gi[g.goalie_id]] = -1.0
             yg[r] = g.goals_against
             og[r] = math.log(g.xg_against)
             ag[r] = age(g.game_id)
-        pmg = np.array([goalie[gid] for gid in ids])
-        th = fit_log_linear(Xg, yg, og, _decay(ag, cfg.half_life_days * 2), pmg, np.full(len(ids), cfg.goalie_prior_sd), cfg.newton_iters)
+        pmg = np.array([0.0] + [goalie[gid] for gid in ids])
+        psg = np.array([0.3] + [cfg.goalie_prior_sd] * len(ids))
+        th = fit_log_linear(Xg, yg, og, _decay(ag, cfg.half_life_days * 2), pmg, psg, cfg.newton_iters)
         goalie = {gid: float(th[gi[gid]]) for gid in ids}
 
     return Ratings(
@@ -204,6 +220,8 @@ def fit_ratings(
         dfn={t: float(theta[4 + n_t + i]) for t, i in T_IDX.items()},
         mu_pp=mu_pp, pp=pp, pk=pk, mu_pen=mu_pen, take=take, draw=draw,
         goalie=goalie,
+        goals_per_xg_5v5=k5,
+        goals_per_xg_pp=kpp,
         n_rows={"5on5": len(rows), "goalie": len(g_rows)},
     )
 

@@ -171,32 +171,48 @@ def generate(
             if avail <= g.start_time + timedelta(hours=4):
                 avail += timedelta(days=1)
             hg, ag = starters[g.game_id]
-            for team, opp, is_home, rates, opp_rates, gf, ga in (
-                (g.home, g.away, True, sc.home, sc.away, res.home_goals, res.away_goals),
-                (g.away, g.home, False, sc.away, sc.home, res.away_goals, res.home_goals),
+            gtruth = truth[str(season)]["goalie"]
+            # Pass 1: per-team xG draws (pre-goalie rates, so xG does not know who is in net).
+            xg = {}
+            taken = {g.home: int(rng.poisson(sc.home.pen)), g.away: int(rng.poisson(sc.away.pen))}
+            for team, is_home, rates, opp_rates, opp_goalie in (
+                (g.home, True, sc.home, sc.away, ag), (g.away, False, sc.away, sc.home, hg),
             ):
-                opp_goalie = ag if is_home else hg
-                own_goalie = hg if is_home else ag
-                raw_ev = rates.ev / math.exp(-truth[str(season)]["goalie"][opp_goalie])
+                ungoalie = math.exp(gtruth[opp_goalie])
                 toi5 = float(rng.normal(2880, 120))
-                xg5 = float(rng.gamma(20, raw_ev * toi5 / 3600 / 20))
-                pens = int(rng.poisson(opp_rates.pen))
-                toi_pp = max(pens * 95.0, 0.0)
-                xg_pp = float(rng.gamma(10, max(rates.pp, 0.1) / math.exp(-truth[str(season)]["goalie"][opp_goalie]) * toi_pp / 3600 / 10)) if toi_pp > 0 else 0.0
-                base = dict(game_id=g.game_id, team=team, opponent=opp, is_home=is_home, game_date=g.start_time.strftime("%Y%m%d"),
-                            goals_for=gf, goals_against=ga, sog_for=int(rng.poisson(29)), sog_against=int(rng.poisson(29)),
-                            available_at=avail, source="synthetic")
-                store.team_stats.append(TeamGameStats(situation="5on5", toi_sec=toi5, xg_for=xg5, xg_against=0.0,
-                                                      penalties_for=0, penalties_against=0, **base))
-                if toi_pp > 0:
-                    store.team_stats.append(TeamGameStats(situation="5on4", toi_sec=toi_pp, xg_for=xg_pp, xg_against=0.0,
-                                                          penalties_for=0, penalties_against=0, **base))
-                store.team_stats.append(TeamGameStats(situation="all", toi_sec=3600.0, xg_for=xg5 + xg_pp + 0.25, xg_against=0.0,
-                                                      penalties_for=int(rng.poisson(rates.pen)), penalties_against=pens, **base))
-                own_xga = float(rng.gamma(20, (opp_rates.ev / math.exp(-truth[str(season)]["goalie"][own_goalie]) * 0.8 + 0.6) / 20))
+                pens_drawn = taken[g.away if is_home else g.home]
+                toi_pp = pens_drawn * 95.0
+                xg[team] = {
+                    "toi5": toi5,
+                    "xg5": float(rng.gamma(20, rates.ev * ungoalie * toi5 / 3600 / 20)),
+                    "toi_pp": toi_pp,
+                    "xg_pp": float(rng.gamma(10, rates.pp * ungoalie * toi_pp / 3600 / 10)) if toi_pp > 0 else 0.0,
+                    "pens_drawn": pens_drawn,
+                    "pens_taken": taken[team],
+                }
+            # Pass 2: rows. Per-strength goals come from the simulated game itself.
+            for team, opp, is_home, own_goalie in ((g.home, g.away, True, hg), (g.away, g.home, False, ag)):
+                side, other = ("h", "a") if is_home else ("a", "h")
+                ev_f, ev_a = int(getattr(o, f"ev_{side}")[0]), int(getattr(o, f"ev_{other}")[0])
+                pp_f = int(getattr(o, f"pp_{side}")[0])
+                opp_en = int(getattr(o, f"en_{other}")[0])
+                gf = res.home_goals if is_home else res.away_goals
+                ga = res.away_goals if is_home else res.home_goals
+                x, xo = xg[team], xg[opp]
+                common = dict(game_id=g.game_id, team=team, opponent=opp, is_home=is_home, game_date=g.start_time.strftime("%Y%m%d"),
+                              sog_for=int(rng.poisson(29)), sog_against=int(rng.poisson(29)), available_at=avail, source="synthetic")
+                store.team_stats.append(TeamGameStats(situation="5on5", toi_sec=x["toi5"], xg_for=x["xg5"], xg_against=xo["xg5"],
+                                                      goals_for=ev_f, goals_against=ev_a, penalties_for=0, penalties_against=0, **common))
+                if x["toi_pp"] > 0:
+                    store.team_stats.append(TeamGameStats(situation="5on4", toi_sec=x["toi_pp"], xg_for=x["xg_pp"], xg_against=0.0,
+                                                          goals_for=pp_f, goals_against=0, penalties_for=0, penalties_against=0, **common))
+                store.team_stats.append(TeamGameStats(situation="all", toi_sec=3600.0, xg_for=x["xg5"] + x["xg_pp"] + 0.25,
+                                                      xg_against=xo["xg5"] + xo["xg_pp"] + 0.25, goals_for=gf, goals_against=ga,
+                                                      penalties_for=x["pens_taken"], penalties_against=x["pens_drawn"], **common))
+                # Goalie: xGA faced while in net; empty-net goals are not charged to him.
                 store.goalie_stats.append(GoalieGameStats(game_id=g.game_id, team=team, goalie_id=own_goalie, started=True,
-                                                          toi_sec=3600.0, shots_against=int(rng.poisson(29)), goals_against=ga,
-                                                          xg_against=own_xga, available_at=avail))
+                                                          toi_sec=3600.0, shots_against=int(rng.poisson(29)), goals_against=ga - opp_en,
+                                                          xg_against=xo["xg5"] + xo["xg_pp"] + 0.25, available_at=avail))
                 # Starter reports: confirmed ~T-90m (60%), projected ~T-6h (30%), none (10%).
                 u = rng.random()
                 if u < 0.6:
