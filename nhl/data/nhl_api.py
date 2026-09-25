@@ -111,7 +111,13 @@ def strength_label(sit: dict[str, int] | None, for_home: bool) -> str:
     return "PP" if own > opp else "SH"
 
 
-def parse_schedule(payload: dict[str, Any], entry: SnapshotEntry) -> list[Game]:
+def parse_schedule(
+    payload: dict[str, Any], entry: SnapshotEntry, historical_available_at: datetime | None = None
+) -> list[Game]:
+    """``available_at`` = snapshot fetch time. For a HISTORICAL backfill (fetched long
+    after the fact) pass ``historical_available_at`` (e.g. the season's schedule
+    release date); postponed/rescheduled games are then a known, documented residual."""
+
     games: list[Game] = []
     days = payload.get("gameWeek") or [{"games": payload.get("games", [])}]
     for day in days:
@@ -126,7 +132,7 @@ def parse_schedule(payload: dict[str, Any], entry: SnapshotEntry) -> list[Game]:
                     home=canonical_team(g["homeTeam"]["abbrev"]),
                     away=canonical_team(g["awayTeam"]["abbrev"]),
                     venue=(g.get("venue") or {}).get("default", ""),
-                    available_at=entry.fetched_at,
+                    available_at=historical_available_at or entry.fetched_at,
                 )
             )
     return sorted(games, key=lambda x: (x.start_time, x.game_id))

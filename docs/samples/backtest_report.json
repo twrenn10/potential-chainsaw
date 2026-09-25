@@ -1,0 +1,177 @@
+{
+  "artifact_chain": {
+    "head": "858711047e35fd309dba087102b7e77facfabb5fab6586464339ddd7adb9682a",
+    "rows": 15444,
+    "verified": true
+  },
+  "clv": {
+    "MODEL_PLUS": {
+      "mean_clv_ev": 0.006034921660643408,
+      "mean_edge_at_bet": 0.06897094164456234,
+      "mean_edge_at_close": 0.04984934202944239,
+      "n": 3016,
+      "paper_roi_secondary": 0.051103698556676354,
+      "share_beat_close": 0.46385941644562334
+    },
+    "PASS": {
+      "mean_clv_ev": -0.05626667212374593,
+      "mean_edge_at_bet": -0.024510247883917778,
+      "mean_edge_at_close": -0.017781261262342495,
+      "n": 10751,
+      "paper_roi_secondary": -0.06682367458210166,
+      "share_beat_close": 0.16537996465445076
+    },
+    "WATCH": {
+      "mean_clv_ev": -0.01900152511689193,
+      "mean_edge_at_bet": 0.03309083780560525,
+      "mean_edge_at_close": 0.024341513578202707,
+      "n": 1677,
+      "paper_roi_secondary": -0.026675870278984527,
+      "share_beat_close": 0.33392963625521765
+    }
+  },
+  "data_origins": [
+    "SYNTHETIC"
+  ],
+  "gate_version": "2026.09.25-v1",
+  "gates": {
+    "ML": {
+      "passed": false,
+      "reasons": [
+        "NOT_ELIGIBLE:SYNTHETIC_DATA",
+        "LOGLOSS_WORSE_THAN_CLOSE",
+        "NO_INFORMATION_BEYOND_MARKET"
+      ]
+    },
+    "PUCK_LINE": {
+      "passed": false,
+      "reasons": [
+        "NOT_ELIGIBLE:SYNTHETIC_DATA"
+      ]
+    },
+    "REG_3WAY": {
+      "passed": false,
+      "reasons": [
+        "NOT_ELIGIBLE:SYNTHETIC_DATA",
+        "LOGLOSS_WORSE_THAN_CLOSE"
+      ]
+    },
+    "TEAM_TOTAL": {
+      "passed": false,
+      "reasons": [
+        "NOT_ELIGIBLE:SYNTHETIC_DATA",
+        "LOGLOSS_WORSE_THAN_CLOSE",
+        "CALIBRATION_SLOPE_OUT_OF_RANGE",
+        "NO_INFORMATION_BEYOND_MARKET"
+      ]
+    },
+    "TOTAL": {
+      "passed": false,
+      "reasons": [
+        "NOT_ELIGIBLE:SYNTHETIC_DATA",
+        "LOGLOSS_WORSE_THAN_CLOSE",
+        "CALIBRATION_SLOPE_OUT_OF_RANGE",
+        "NO_INFORMATION_BEYOND_MARKET"
+      ]
+    }
+  },
+  "markets": {
+    "ML": {
+      "blend_w": 0.24061674674330594,
+      "blend_w_ci": [
+        -0.3487883182392046,
+        0.8836776573670944
+      ],
+      "brier_close": 0.24697797366100394,
+      "brier_model": 0.24801714320472226,
+      "calib_intercept": 0.06415599058823125,
+      "calib_slope": 0.937414841216903,
+      "delta_log_loss": 0.002097187796849531,
+      "delta_log_loss_ci": [
+        -0.003072206145613135,
+        0.006878384977076589
+      ],
+      "ece_model": 0.016064727272727286,
+      "log_loss_close": 0.68707231042742,
+      "log_loss_model": 0.6891694982242695,
+      "n": 1188
+    },
+    "PUCK_LINE": {
+      "blend_w": 0.524767483445052,
+      "blend_w_ci": [
+        0.037636618416544435,
+        1.1175311794183547
+      ],
+      "brier_close": 0.20816968531233943,
+      "brier_model": 0.2079494607435539,
+      "calib_intercept": 0.03751463384238318,
+      "calib_slope": 0.9508565306417616,
+      "delta_log_loss": -0.00027160425400030164,
+      "delta_log_loss_ci": [
+        -0.005739420454147895,
+        0.004291891990234973
+      ],
+      "ece_model": 0.009478971380471386,
+      "log_loss_close": 0.6068007735716285,
+      "log_loss_model": 0.6065291693176282,
+      "n": 1188
+    },
+    "REG_3WAY": {
+      "delta_log_loss": 0.00020810156372430555,
+      "log_loss_close": 1.0693630388618083,
+      "log_loss_model": 1.0695711404255326,
+      "n": 1188
+    },
+    "TEAM_TOTAL": {
+      "blend_w": 0.3062922972284289,
+      "blend_w_ci": [
+        -0.09657988559261395,
+        0.7371002852422105
+      ],
+      "brier_close": 0.23675540865512515,
+      "brier_model": 0.23754319373047178,
+      "calib_intercept": 0.07558632889616021,
+      "calib_slope": 0.770659423099825,
+      "delta_log_loss": 0.0016947692266767733,
+      "delta_log_loss_ci": [
+        -0.0020362802676546637,
+        0.005073970350904742
+      ],
+      "ece_model": 0.009284553451178465,
+      "log_loss_close": 0.6662819783664666,
+      "log_loss_model": 0.6679767475931434,
+      "n": 2376
+    },
+    "TOTAL": {
+      "blend_w": 0.17741634990294433,
+      "blend_w_ci": [
+        -0.35576937899060274,
+        0.7018031369488662
+      ],
+      "brier_close": 0.24807324622599783,
+      "brier_model": 0.2496824964606044,
+      "calib_intercept": -0.08302459341541946,
+      "calib_slope": 0.32878217310743096,
+      "delta_log_loss": 0.00324774073983336,
+      "delta_log_loss_ci": [
+        -0.002066104758244605,
+        0.008565900281563206
+      ],
+      "ece_model": 0.009840424242424248,
+      "log_loss_close": 0.6892906615650857,
+      "log_loss_model": 0.692538402304919,
+      "n": 1188
+    }
+  },
+  "missing_close": 0,
+  "mode": "BACKTEST",
+  "n_artifacts": 15444,
+  "walk_forward": {
+    "artifacts": 15444,
+    "days": 178,
+    "errors": [],
+    "games_priced": 1188,
+    "games_skipped": 0,
+    "skipped_identical": 0
+  }
+}

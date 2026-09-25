@@ -1,0 +1,52 @@
+{
+  "data_health": {
+    "as_of": "2026-01-20T22:00:00+00:00",
+    "counts": {
+      "FAIL": 0,
+      "PASS": 43,
+      "WARN": 3
+    },
+    "failures": [
+      {
+        "detail": "age_min=240.0",
+        "game_id": "2025020702",
+        "name": "ODDS_FRESH",
+        "status": "WARN"
+      },
+      {
+        "detail": "age_min=240.0",
+        "game_id": "2025020703",
+        "name": "ODDS_FRESH",
+        "status": "WARN"
+      },
+      {
+        "detail": "age_min=240.0",
+        "game_id": "2025020704",
+        "name": "ODDS_FRESH",
+        "status": "WARN"
+      }
+    ],
+    "hard_fail": false,
+    "score": 0.9674
+  },
+  "feature_version": "nhl-feat-0.1.0",
+  "games": 5,
+  "goalies": {
+    "CONFIRMED": 2,
+    "PROJECTED": 2,
+    "UNKNOWN": 6
+  },
+  "lanes": {
+    "BLOCKED": 65
+  },
+  "markets": 65,
+  "model_version": "nhl-gs-0.1.0",
+  "note": "Phase 1: no ACTIONABLE lane. Shadow lanes are informational only.",
+  "pipeline": "READY",
+  "shadow_lanes": {
+    "MODEL_PLUS": 8,
+    "PASS": 45,
+    "WATCH": 12
+  },
+  "slate": "2026-01-20"
+}
