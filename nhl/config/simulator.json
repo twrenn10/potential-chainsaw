@@ -1,12 +1,12 @@
 {
   "_doc": "League-level defaults for the game-state simulator. Team/goalie effects come from nhl.features.ratings; these are baselines to be REFIT on historical data before any gate is evaluated. Rates are goals (or penalties) per 60 minutes of that state, for ONE team.",
-  "dt_seconds": 5,
+  "dt_seconds": 10,
   "n_sims": 20000,
   "regulation_seconds": 3600,
   "period_seconds": 1200,
-  "rate_5v5": 2.45,
-  "rate_4v4_mult": 1.30,
-  "rate_pp": 6.8,
+  "rate_5v5": 2.6,
+  "rate_4v4_mult": 1.3,
+  "rate_pp": 6.5,
   "rate_sh": 0.75,
   "rate_6v5_attack": 5.4,
   "rate_empty_net": 13.0,
@@ -20,5 +20,5 @@
   "ot_seconds": 300,
   "rate_3v3": 6.0,
   "shootout_home_prob": 0.5,
-  "home_ice_log_mult": 0.035
+  "backtest_n_sims": 4000
 }
