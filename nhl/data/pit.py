@@ -116,6 +116,11 @@ class PointInTimeView:
                 latest[key] = s
         return sorted(latest.values(), key=lambda s: (s.market.value, s.team or "", s.line or 0.0, s.selection.value, s.book))
 
+    def odds_snapshots(self, game_ids: set[str]) -> list[OddsSnapshot]:
+        """Every visible odds observation (full history up to as_of) for these games."""
+
+        return [s for s in self._store.odds if s.game_id in game_ids and s.snapshot_ts <= self.as_of]
+
     def team_games_played(self) -> dict[str, list[str]]:
         """Game ids with visible results per team, chronological."""
 
