@@ -4,12 +4,32 @@
   "actionable_enabled": false,
   "max_odds_age_minutes": 30,
   "min_data_health": 0.95,
-  "block_on_unknown_goalie": true,
   "lanes_by_market": {
-    "ML": {"watch_min_edge": 0.02, "model_plus_min_edge": 0.035, "actionable_min_edge": 0.045},
-    "REG_3WAY": {"watch_min_edge": 0.025, "model_plus_min_edge": 0.04, "actionable_min_edge": 0.05},
-    "PUCK_LINE": {"watch_min_edge": 0.025, "model_plus_min_edge": 0.04, "actionable_min_edge": 0.05},
-    "TOTAL": {"watch_min_edge": 0.02, "model_plus_min_edge": 0.035, "actionable_min_edge": 0.045},
-    "TEAM_TOTAL": {"watch_min_edge": 0.03, "model_plus_min_edge": 0.05, "actionable_min_edge": 0.06}
-  }
+    "ML": {
+      "watch_min_edge": 0.02,
+      "model_plus_min_edge": 0.035,
+      "actionable_min_edge": 0.045
+    },
+    "REG_3WAY": {
+      "watch_min_edge": 0.025,
+      "model_plus_min_edge": 0.04,
+      "actionable_min_edge": 0.05
+    },
+    "PUCK_LINE": {
+      "watch_min_edge": 0.025,
+      "model_plus_min_edge": 0.04,
+      "actionable_min_edge": 0.05
+    },
+    "TOTAL": {
+      "watch_min_edge": 0.02,
+      "model_plus_min_edge": 0.035,
+      "actionable_min_edge": 0.045
+    },
+    "TEAM_TOTAL": {
+      "watch_min_edge": 0.03,
+      "model_plus_min_edge": 0.05,
+      "actionable_min_edge": 0.06
+    }
+  },
+  "actionable_requires_confirmed_goalies": true
 }
