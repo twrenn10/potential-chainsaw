@@ -1,0 +1,14 @@
+{
+  "_doc": "Probabilistic starter priors. P(start) is never set to 1.0 from a report alone.",
+  "p_start_confirmed": 0.985,
+  "p_start_projected": 0.88,
+  "unknown_model": {
+    "_doc": "logit P(start) = intercept + b_share*logit(recent start share) + b_b2b_second*[team on 2nd night of B2B AND goalie started night 1] + b_rest*min(days_rest,3)",
+    "intercept": 0.0,
+    "b_share": 1.0,
+    "b_b2b_second": -2.2,
+    "b_rest": 0.15,
+    "recent_starts_window": 20,
+    "share_prior_starts": 4.0
+  }
+}

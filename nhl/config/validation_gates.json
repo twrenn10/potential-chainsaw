@@ -1,0 +1,19 @@
+{
+  "_doc": "PREDETERMINED walk-forward gates (Phase 1C). Changing these after looking at results invalidates the test; bump gate_version and log the reason instead.",
+  "gate_version": "2026.09.25-v1",
+  "defaults": {
+    "min_scored_games": 1000,
+    "max_delta_logloss_vs_close": 0.0,
+    "calibration_slope_range": [0.85, 1.15],
+    "max_ece": 0.025,
+    "blend_weight_ci_lower_gt": 0.0,
+    "bootstrap_reps": 1000
+  },
+  "markets": {
+    "ML": {},
+    "REG_3WAY": {},
+    "PUCK_LINE": {},
+    "TOTAL": {},
+    "TEAM_TOTAL": {}
+  }
+}

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nhl-model"
+version = "0.1.0"
+description = "NHL Desk: point-in-time NHL pricing engine with governance-gated promotion."
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+nhl = "nhl.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["nhl*"]
+
+[tool.setuptools.package-data]
+"nhl.config" = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

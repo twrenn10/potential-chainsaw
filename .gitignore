@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+# Generated stores and outputs (never hand-edit; regenerate from raw snapshots)
+store/
+out/
