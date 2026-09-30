@@ -88,7 +88,10 @@ def run_slate(
     tp = team_priors(view, roster, season, league["rate_5v5"])
     ratings = fit_ratings(view, season, tp, goalie_priors(view, season), league)
     health = evaluate_slate(view, [g.game_id for g in slate], teams_with_prior=set(tp))
-    priced, errors = price_slate(view, slate, ratings, n_sims=n_sims, seed=game_seed(seed, as_of.isoformat()), sim_cfg=sim_cfg)
+    # Seed from the information state (parameters, constants, slate), not the clock, so an
+    # unchanged state reproduces identical prices (common random numbers across reprices).
+    info_seed = game_seed(seed, "|".join([ratings_fingerprint(ratings), constants.constants_id]))
+    priced, errors = price_slate(view, slate, ratings, n_sims=n_sims, seed=info_seed, sim_cfg=sim_cfg)
     artifacts = build_artifacts(
         view, priced, view.odds_snapshots({g.game_id for g in slate}), health, mode, created_at=created_at or utcnow(),
         extra_provenance_blocks=extra_blocks, constants=constants, roster_fingerprints=roster_fingerprints(roster),

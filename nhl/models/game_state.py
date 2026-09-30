@@ -105,12 +105,41 @@ def _col(values: list[float]) -> np.ndarray:
     return np.asarray(values, dtype=float)[:, None]
 
 
-def simulate(scenarios: list[GameRates], n_sims: int, seed: int, cfg: dict | None = None) -> list[SimOutcome]:
+class _Streams:
+    """Random uniforms for a scenario batch.
+
+    Without ``groups``: one stream for the whole batch (legacy behaviour).
+    With ``groups`` = [(seed, n_scenarios), ...]: every group (one game) has its own
+    stream, and all scenarios inside a group share the SAME uniforms (common random
+    numbers across the goalie-mixture components). One game's scenario count can then
+    never shift another game's random numbers.
+    """
+
+    def __init__(self, m: int, n: int, seed: int, groups: list[tuple[int, int]] | None) -> None:
+        self.n = n
+        self.m = m
+        if groups is None:
+            self.single = np.random.default_rng(seed)
+            self.groups = None
+        else:
+            if sum(k for _, k in groups) != m:
+                raise ValueError("groups must partition the scenarios")
+            self.single = None
+            self.groups = [(np.random.default_rng(s), k) for s, k in groups]
+
+    def draw(self) -> np.ndarray:
+        if self.groups is None:
+            return self.single.random((self.m, self.n))
+        return np.concatenate([np.broadcast_to(g.random((1, self.n)), (k, self.n)) for g, k in self.groups], axis=0)
+
+
+def simulate(scenarios: list[GameRates], n_sims: int, seed: int, cfg: dict | None = None,
+             groups: list[tuple[int, int]] | None = None) -> list[SimOutcome]:
     cfg = cfg or load("simulator")
     m = len(scenarios)
     if m == 0:
         return []
-    rng = np.random.default_rng(seed)
+    rng = _Streams(len(scenarios), n_sims, seed, groups)
     dt = float(cfg["dt_seconds"])
     reg_len = int(cfg["regulation_seconds"])
     n_steps = int(round(reg_len / dt))
@@ -158,8 +187,8 @@ def simulate(scenarios: list[GameRates], n_sims: int, seed: int, cfg: dict | Non
         rate_h = np.where(pulled_a, H["empty_net"], rate_h)
         rate_a = np.where(pulled_h, A["empty_net"], rate_a)
 
-        u_h = rng.random(shape)
-        u_a = rng.random(shape)
+        u_h = rng.draw()
+        u_a = rng.draw()
         g_h = u_h < rate_h * per_step
         g_a = u_a < rate_a * per_step
         # A penalty can start only for a team not already serving one; split the same uniform.
@@ -185,7 +214,7 @@ def simulate(scenarios: list[GameRates], n_sims: int, seed: int, cfg: dict | Non
     tie = sh == sa
     lam = (H["ot"] + A["ot"]) / 3600.0
     p_ot_goal = 1.0 - np.exp(-lam * cfg["ot_seconds"])
-    u1, u2, u3 = rng.random(shape), rng.random(shape), rng.random(shape)
+    u1, u2, u3 = rng.draw(), rng.draw(), rng.draw()
     ot_goal = tie & (u1 < p_ot_goal)
     ot_home = ot_goal & (u2 < H["ot"] / (H["ot"] + A["ot"]))
     ot_away = ot_goal & ~ot_home

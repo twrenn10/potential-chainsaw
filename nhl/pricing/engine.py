@@ -96,7 +96,9 @@ def price_slate(
         plan.append((g, hd, ad, weights, start))
 
     base_seed = seed if seed is not None else game_seed("slate", view.as_of.isoformat())
-    outcomes = simulate(scenarios, n_sims, base_seed, cfg)
+    # One independent stream per game (common random numbers across its goalie pairs).
+    groups = [(game_seed(str(base_seed), g.game_id), len(w)) for g, _, _, w, _ in plan]
+    outcomes = simulate(scenarios, n_sims, base_seed, cfg, groups=groups)
     priced = []
     for g, hd, ad, weights, start in plan:
         outs = outcomes[start:start + len(weights)]

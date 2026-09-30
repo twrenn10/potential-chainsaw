@@ -125,8 +125,11 @@ def fit_ratings(
     stats = [s for s in view.team_stats() if int(s.game_id[:4]) == season]
     assert_visible(stats, view.as_of, "team_stats")
     sched = team_schedule_features(view.games())
-    as_of_ts = view.as_of.timestamp()
     game_start = {g.game_id: g.start_time.timestamp() for g in view.games()}
+    # Decay reference = newest visible data, NOT the clock: ratings are a function of the
+    # information available, so re-running later with no new data gives identical values.
+    data_times = [game_start[s.game_id] for s in stats if s.game_id in game_start]
+    as_of_ts = max(data_times) if data_times else view.as_of.timestamp()
     n_t = len(TEAM_LIST)
 
     def age(gid: str) -> float:
