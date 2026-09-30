@@ -32,48 +32,97 @@ class ArtifactError(RuntimeError):
     pass
 
 
+SCHEMA_VERSION = "artifact-v2"
+
+
 @dataclass(frozen=True)
 class PredictionArtifact:
+    """One immutable priced outcome. The pricing chain is kept in distinct fields:
+
+    model probability -> model fair odds -> raw market probability -> no-vig market
+    probability -> probability edge -> execution price -> EV -> governance eligibility.
+    """
+
+    # identity / timing
     prediction_id: str
-    created_at: str
-    as_of: str
-    puck_drop: str
-    mode: str
+    schema_version: str
+    created_at: str  # wall-clock write time
+    as_of: str  # information cutoff
+    puck_drop: str  # scheduled puck drop known at as_of
+    mode: str  # FORWARD | BACKTEST
     data_origin: str
+    evidence_lane: str  # DEV_SYNTHETIC | HISTORICAL_RESEARCH | STRICT_WALK_FORWARD | SHADOW_FORWARD | FORWARD_DEGRADED
+    # market identity
     game_id: str
     market: str
+    period: str
     selection: str
     line: float | None
     team: str | None
-    market_key: str
+    participant: str | None
+    market_key: str  # outcome key (book-agnostic)
+    market_id: str  # group key (book-agnostic)
     sportsbook: str
-    market_price: int
+    provider: str
+    market_snapshot_ref: str  # exact observations the quote came from
     market_observed_at: str
-    no_vig_probability: float
+    quote_age_minutes: float
+    # market side of the chain
+    execution_price: int  # American, as offered
+    execution_decimal: float  # exact price used for EV
+    raw_implied_probability: float  # 1/decimal, includes margin
+    no_vig_probability: float  # benchmark
+    novig_method: str
+    market_overround: float
+    # model side of the chain
     model_probability: float  # win prob conditional on no push
     model_p_win: float
     model_p_push: float
-    fair_price: int | None
-    edge: float  # model_probability - no_vig_probability
-    ev_per_unit: float  # at market_price, push-aware
+    model_fair_price: int | None  # American
+    model_fair_decimal: float | None
+    # comparisons (never a single ambiguous "edge")
+    probability_edge: float  # model_probability - no_vig_probability
+    fair_price_edge: float | None  # execution_decimal / model_fair_decimal - 1
+    ev_per_unit: float  # push-aware EV at execution_price
+    # state / lineage fingerprints
     goalie_state: str
+    goalie_fingerprint: str
     lineup_state: str
+    roster_fingerprint: str
     model_version: str
     feature_version: str
+    parameter_fingerprint: str
+    constants_id: str
+    default_constants: str  # JSON list of simulator constants still at static defaults
     config_hash: str
     data_snapshot_id: str
     health_score: float
-    status: str
-    shadow_lane: str
-    reason_codes: str  # JSON list
+    # governance
+    status: str  # action lane: BLOCKED | UNVALIDATED | ... | ACTIONABLE
+    shadow_lane: str  # informational only
+    eligibility: str
+    block_reasons: str  # JSON list of HARD_BLOCK reasons
+    reason_codes: str  # JSON list of all reasons (hard + soft)
+    state_fingerprint: str  # everything price-relevant; equal => no new artifact needed
 
     def content(self) -> dict[str, Any]:
         return asdict(self)
 
 
 COLUMNS = list(PredictionArtifact.__dataclass_fields__)
-_REAL = {"line", "no_vig_probability", "model_probability", "model_p_win", "model_p_push", "edge", "ev_per_unit", "health_score"}
-_INT = {"market_price", "fair_price"}
+_REAL = {"line", "quote_age_minutes", "execution_decimal", "raw_implied_probability", "no_vig_probability",
+         "market_overround", "model_probability", "model_p_win", "model_p_push", "model_fair_decimal",
+         "probability_edge", "fair_price_edge", "ev_per_unit", "health_score"}
+_INT = {"execution_price", "model_fair_price"}
+STATE_EXCLUDE = {"prediction_id", "created_at", "as_of", "quote_age_minutes", "market_observed_at",
+                 "market_snapshot_ref", "data_snapshot_id", "health_score", "state_fingerprint"}
+
+
+def state_fingerprint(content: dict[str, Any]) -> str:
+    """Hash of every price-relevant field. Re-observing an unchanged price, or the clock
+    moving, does not change it; any change to inputs, prices, outputs or governance does."""
+
+    return "S:" + sha256(_canonical({k: v for k, v in content.items() if k not in STATE_EXCLUDE}).encode()).hexdigest()[:24]
 
 
 def make_prediction_id(game_id: str, market_key: str, sportsbook: str, as_of: str, model_version: str, mode: str) -> str:
@@ -115,6 +164,10 @@ class PredictionStore:
             """
         )
         self.conn.commit()
+        have = [r[1] for r in self.conn.execute("PRAGMA table_info(predictions)")]
+        if have[1:-2] != COLUMNS:
+            raise ArtifactError(f"{self.path}: artifact schema differs from {SCHEMA_VERSION}; open a new store "
+                                "(existing stores are never altered)")
 
     def close(self) -> None:
         self.conn.close()
@@ -137,6 +190,10 @@ class PredictionStore:
                 if a.mode == PredictionMode.FORWARD.value and (created >= drop or wall >= drop):
                     raise ArtifactError(f"{a.prediction_id}: forward prediction written at/after puck drop")
                 content = a.content()
+                if a.schema_version != SCHEMA_VERSION:
+                    raise ArtifactError(f"{a.prediction_id}: schema {a.schema_version} != {SCHEMA_VERSION}")
+                if a.state_fingerprint != state_fingerprint(content):
+                    raise ArtifactError(f"{a.prediction_id}: state_fingerprint does not match content")
                 bad = [k for k, v in content.items() if isinstance(v, float) and not math.isfinite(v)]
                 if bad:
                     raise ArtifactError(f"{a.prediction_id}: non-finite values in {bad} (would not round-trip SQLite)")
@@ -173,6 +230,31 @@ class PredictionStore:
                 return False, f"seq {seq}: content hash mismatch"
             prev = row_hash
         return True, prev
+
+    def latest_state(self, mode: str) -> dict[tuple[str, str, str], str]:
+        """Latest state fingerprint per (game_id, market_key, sportsbook) for a mode."""
+
+        out: dict[tuple[str, str, str], str] = {}
+        cur = self.conn.execute(
+            "SELECT game_id, market_key, sportsbook, state_fingerprint FROM predictions WHERE mode = ? ORDER BY seq", (mode,))
+        for g, k, b, f in cur:
+            out[(g, k, b)] = f
+        return out
+
+    def append_if_changed(self, artifacts: list[PredictionArtifact], now: str | None = None) -> dict[str, int]:
+        """Reprice semantics: append only artifacts whose state differs from the latest
+        stored artifact for the same outcome/book/mode. Never rewrites anything."""
+
+        fresh, unchanged = [], 0
+        latest = {m: self.latest_state(m) for m in {a.mode for a in artifacts}}
+        for a in artifacts:
+            if latest[a.mode].get((a.game_id, a.market_key, a.sportsbook)) == a.state_fingerprint:
+                unchanged += 1
+            else:
+                fresh.append(a)
+        res = self.append(fresh, now=now)
+        res["unchanged_state"] = unchanged
+        return res
 
     def count(self) -> int:
         return int(self.conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0])

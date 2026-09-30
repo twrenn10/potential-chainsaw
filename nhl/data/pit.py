@@ -66,7 +66,12 @@ class HistoricalStore:
         return max(versions, key=lambda g: (g.available_at is not None, g.available_at or g.start_time))
 
     def latest_games(self) -> dict[str, Game]:
-        return {gid: self.game(gid) for gid in sorted({g.game_id for g in self.games})}
+        best: dict[str, Game] = {}
+        key = lambda g: (g.available_at is not None, g.available_at or g.start_time)  # noqa: E731
+        for g in self.games:
+            if g.game_id not in best or key(g) >= key(best[g.game_id]):
+                best[g.game_id] = g
+        return dict(sorted(best.items()))
 
     def view(self, as_of: str | datetime, strict: bool = True) -> "PointInTimeView":
         return PointInTimeView(self, parse_ts(as_of), strict=strict)
@@ -145,6 +150,12 @@ class PointInTimeView:
             if key not in latest or rep.available_at >= latest[key].available_at:
                 latest[key] = rep
         return sorted(latest.values(), key=lambda r: (r.team, r.goalie_id))
+
+    def goalie_report_history(self, game_id: str) -> list[GoalieReport]:
+        """Every visible starter report for a game (all sources), chronological."""
+
+        rows = self._visible(r for r in self._store.goalie_reports if r.game_id == game_id)
+        return sorted(rows, key=lambda r: (r.available_at, r.team, r.source, r.goalie_id, r.state.value))
 
     def odds(self, game_id: str, market: MarketType | None = None) -> list[OddsSnapshot]:
         """Latest visible price per (book, market, team, line, selection)."""

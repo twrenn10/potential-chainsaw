@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import timedelta
 
 from nhl.config import load
 from nhl.contracts import Game, GoalieState
@@ -28,6 +29,17 @@ class StarterDistribution:
     team: str
     state: GoalieState  # best information state visible
     probs: tuple[tuple[str, float], ...]  # (goalie_id, p), sorted desc, sums to 1
+    flags: tuple[str, ...] = ()  # GOALIE_SOURCE_CONFLICT, GOALIE_REPORT_STALE, GOALIE_SCRATCHED:<id>, ...
+    reports: tuple[str, ...] = ()  # lineage: every report considered, "source|goalie|state|available_at"
+
+    @property
+    def confirmed(self) -> bool:
+        return self.state is GoalieState.CONFIRMED and "GOALIE_SOURCE_CONFLICT" not in self.flags
+
+    def fingerprint(self) -> str:
+        from nhl.contracts import stable_digest
+
+        return stable_digest([self.team, self.state.value, repr(self.probs), repr(self.flags), repr(self.reports)], 16)
 
     @property
     def top(self) -> tuple[str, float]:
@@ -79,33 +91,80 @@ def workload_weights(view: PointInTimeView, game: Game, team: str, cfg: dict | N
     return out
 
 
+P_NAMED = {
+    GoalieState.CONFIRMED: "p_start_confirmed",
+    GoalieState.EXPECTED: "p_start_expected",
+    GoalieState.PROBABLE: "p_start_probable",
+    GoalieState.PROJECTED: "p_start_projected",
+}
+
+
 def starter_distribution(view: PointInTimeView, game: Game, team: str) -> StarterDistribution:
+    """Starter mixture from ONLY the reports visible at ``view.as_of``.
+
+    Lineage rules (docs/goalie_information_lineage.md):
+    * each source's LATEST visible report is its current call;
+    * a goalie whose latest report from any source is SCRATCHED gets p = 0;
+    * a report older than ``stale_report_hours`` before puck drop is stale: flagged,
+      not used to name a starter;
+    * the strongest state wins; if sources at that state name different goalies the
+      claim is a CONFLICT: flagged, never "confirmed", and the named mass is split
+      across the named goalies by the workload model;
+    * UNKNOWN never becomes confirmed; with no usable claim the workload model decides.
+    """
+
     cfg = load("goalie_start")
     weights = workload_weights(view, game, team, cfg["unknown_model"])
-    reports = [r for r in view.goalie_reports(game.game_id) if r.team == team]
-    best = None
-    for rep in reports:
-        rank = {GoalieState.CONFIRMED: 2, GoalieState.PROJECTED: 1, GoalieState.UNKNOWN: 0}[rep.state]
-        if best is None or (rank, rep.available_at) > best[0]:
-            best = ((rank, rep.available_at), rep)
+    history = [r for r in view.goalie_report_history(game.game_id) if r.team == team]
+    stale_before = game.start_time - timedelta(hours=float(cfg["stale_report_hours"]["value"]))
+    flags: list[str] = []
+    lineage = tuple(f"{r.source}|{r.goalie_id}|{r.state.value}|{r.available_at.strftime('%Y-%m-%dT%H:%M:%SZ')}" for r in history)
 
-    if best is not None and best[1].state in (GoalieState.CONFIRMED, GoalieState.PROJECTED):
-        rep = best[1]
-        p_named = cfg["p_start_confirmed"] if rep.state is GoalieState.CONFIRMED else cfg["p_start_projected"]
-        others = {g: w for g, w in weights.items() if g != rep.goalie_id}
+    latest_by_source: dict[str, object] = {}
+    latest_by_goalie: dict[str, object] = {}
+    for r in history:  # chronological -> last write wins, deterministic tie order from the sort
+        latest_by_source[r.source] = r
+        latest_by_goalie[r.goalie_id] = r
+    scratched = sorted(g for g, r in latest_by_goalie.items() if r.state is GoalieState.SCRATCHED)
+    flags.extend(f"GOALIE_SCRATCHED:{g}" for g in scratched)
+    for g in scratched:
+        weights.pop(g, None)
+
+    claims = []
+    for src in sorted(latest_by_source):
+        r = latest_by_source[src]
+        if r.state.rank == 0 or r.goalie_id in scratched:
+            continue
+        if r.available_at < stale_before:
+            flags.append(f"GOALIE_REPORT_STALE:{src}")
+            continue
+        claims.append(r)
+
+    if claims:
+        top_rank = max(r.state.rank for r in claims)
+        top = [r for r in claims if r.state.rank == top_rank]
+        named = sorted({r.goalie_id for r in top})
+        state = top[0].state
+        if len(named) > 1:
+            flags.append("GOALIE_SOURCE_CONFLICT")
+        if len({r.goalie_id for r in claims}) > len(named):
+            flags.append("GOALIE_SOURCE_DISAGREEMENT")
+        p_named = float(cfg[P_NAMED[state]])
+        wn = {g: weights.get(g, 0.0) for g in named}
+        wn_tot = sum(wn.values())
+        probs = {g: p_named * (wn[g] / wn_tot if wn_tot > 0 else 1.0 / len(named)) for g in named}
+        others = {g: w for g, w in weights.items() if g not in named}
         tot = sum(others.values())
-        probs = {rep.goalie_id: p_named}
         if tot > 0:
             for g, w in others.items():
                 probs[g] = (1 - p_named) * w / tot
         else:
-            probs[rep.goalie_id] = 1.0  # no known alternative: unavoidable
-        state = rep.state
+            probs = {g: p / p_named for g, p in probs.items()}  # no known alternative: unavoidable
     else:
         if not weights:
-            raise ValueError(f"{team}: no goalie report and no start history visible at {view.as_of}")
+            raise ValueError(f"{team}: no usable goalie report and no start history visible at {view.as_of}")
         tot = sum(weights.values())
         probs = {g: w / tot for g, w in weights.items()}
         state = GoalieState.UNKNOWN
     ordered = tuple(sorted(((g, round(p, 6)) for g, p in probs.items()), key=lambda gp: (-gp[1], gp[0])))
-    return StarterDistribution(team=team, state=state, probs=ordered)
+    return StarterDistribution(team=team, state=state, probs=ordered, flags=tuple(sorted(set(flags))), reports=lineage)

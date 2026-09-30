@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from nhl.config import load
-from nhl.contracts import Game, GoalieState, stable_digest
+from nhl.contracts import Game, stable_digest
 from nhl.data.pit import PointInTimeView
 from nhl.features.ratings import Ratings
 from nhl.features.rest_travel import team_schedule_features
@@ -29,13 +29,22 @@ class PricedGame:
 
         def fmt(side: str, d: StarterDistribution) -> str:
             g, p = d.top
-            return f"{side}:{d.state.value}({g}@{p:.3f})"
+            conflict = "*CONFLICT" if "GOALIE_SOURCE_CONFLICT" in d.flags else ""
+            return f"{side}:{d.state.value}{conflict}({g}@{p:.3f})"
 
         return f"{fmt('HOME', self.home_starters)}|{fmt('AWAY', self.away_starters)}"
 
     @property
     def both_confirmed(self) -> bool:
-        return self.home_starters.state is GoalieState.CONFIRMED and self.away_starters.state is GoalieState.CONFIRMED
+        return self.home_starters.confirmed and self.away_starters.confirmed
+
+    @property
+    def goalie_fingerprint(self) -> str:
+        return "G:" + stable_digest([self.home_starters.fingerprint(), self.away_starters.fingerprint()], 16)
+
+    @property
+    def goalie_flags(self) -> list[str]:
+        return sorted({f"{side}:{f}" for side, d in (("HOME", self.home_starters), ("AWAY", self.away_starters)) for f in d.flags})
 
 
 def game_seed(game_id: str, as_of_iso: str) -> int:

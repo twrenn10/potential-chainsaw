@@ -63,12 +63,14 @@ def export_desk(
         "games": len(priced),
         "markets": len(rows),
         "lanes": dict(sorted(Counter(a.status for a in rows).items())),
+        "evidence_lanes": dict(sorted(Counter(a.evidence_lane for a in rows).items())),
+        "eligibility": dict(sorted(Counter(a.eligibility for a in rows).items())),
         "shadow_lanes": dict(sorted(Counter(a.shadow_lane for a in rows).items())),
         "goalies": dict(sorted(goalie_counts.items())),
         "data_health": health.to_dict(),
         "model_version": MODEL_VERSION,
         "feature_version": FEATURE_VERSION,
-        "note": "Phase 1: no ACTIONABLE lane. Shadow lanes are informational only.",
+        "note": "No ACTIONABLE lane until gates pass. Shadow lanes are informational only.",
     }
     summary_path = out / "NHL_DESK_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -112,13 +114,14 @@ def render_text(summary: dict[str, Any], rows: list[PredictionArtifact], priced:
         g = p.game
         lines.append(f"{g.away} @ {g.home}  ({g.start_time:%Y-%m-%d %H:%MZ})  P(OT)={p.pricing.p_ot + p.pricing.p_so:.3f}  E[total]={p.pricing.mean_total:.2f}")
         lines.append(f"  goalies: {p.goalie_state}")
-        best = sorted(by_game.get(g.game_id, []), key=lambda a: -a.edge)[:4]
+        best = sorted(by_game.get(g.game_id, []), key=lambda a: (-a.probability_edge, a.market_key, a.sportsbook))[:4]
         for a in best:
             label = f"{a.market} {a.team + ' ' if a.team else ''}{a.selection}{'' if a.line is None else f' {a.line:+.1f}'}"
-            fair = "n/a" if a.fair_price is None else f"{a.fair_price:+d}"
+            fair = "n/a" if a.model_fair_price is None else f"{a.model_fair_price:+d}"
             lines.append(
-                f"  {label:<26} mkt {a.market_price:+5d}  nv {a.no_vig_probability:.3f}  model {a.model_probability:.3f}"
-                f"  fair {fair:>5}  edge {a.edge * 100:+.1f}%  [{a.status} | shadow {a.shadow_lane}]"
+                f"  {label:<26} px {a.execution_price:+5d}  raw {a.raw_implied_probability:.3f}  nv {a.no_vig_probability:.3f}"
+                f"  model {a.model_probability:.3f}  fair {fair:>5}  p-edge {a.probability_edge * 100:+.1f}%"
+                f"  EV {a.ev_per_unit * 100:+.1f}%  [{a.status} | {a.eligibility} | shadow {a.shadow_lane}]"
             )
         lines.append("")
     return "\n".join(lines)

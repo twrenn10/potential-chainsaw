@@ -141,11 +141,17 @@ def parse_goalie_reports_checked(
             published = strict_utc(r["available_at"], "available_at") if r["available_at"].strip() else None
             if published is not None and published >= start:
                 raise FieldError("report published at/after puck drop is not pregame information")
+            if not (r["source"] or "").strip():
+                raise FieldError("source required")
+            conf_raw = (r.get("confidence") or "").strip()
+            from .validation import strict_float
+
+            confidence = strict_float(conf_raw, "confidence", 0.0, 1.0) if conf_raw else None
             p = prov.published_report("goalie:" + r["source"], entry.snapshot_id, entry.fetched_at, start, published, mode)
             out.records.append(GoalieReport(
                 game_id=r["game_id"], team=r["team"], goalie_id=r["goalie_id"],
-                state=GoalieState(r["state"].strip().upper()), source=r["source"],
-                available_at=p.available_at, provenance=p,
+                state=GoalieState(r["state"].strip().upper()), source=r["source"].strip(),
+                available_at=p.available_at, provenance=p, confidence=confidence,
             ))
         except (FieldError, prov.ProvenanceError, ValueError, KeyError) as exc:
             out.reject("goalie_reports", key, str(exc))

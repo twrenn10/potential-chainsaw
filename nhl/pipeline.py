@@ -12,10 +12,10 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from nhl.config import load
-from nhl.contracts import Game, PredictionMode
+from nhl.contracts import Game, PredictionMode, stable_digest
 from nhl.data.pit import HistoricalStore, LeakageError, PointInTimeView
 from nhl.data.quality import HealthReport, evaluate_slate
-from nhl.desk.candidates import build_artifacts
+from nhl.desk.candidates import build_artifacts, ratings_fingerprint
 from nhl.contracts.schemas import PRICEABLE_STATUSES
 from nhl.features.league_constants import LeagueConstants, fit_league_constants
 from nhl.features.priors import RosterSlot, goalie_priors, roster_as_of, team_priors
@@ -23,6 +23,14 @@ from nhl.features.ratings import Ratings, fit_ratings, league_baselines
 from nhl.ledger.predictions import PredictionArtifact
 from nhl.pricing.engine import PricedGame, game_seed, price_slate
 from nhl.timeutil import utcnow
+
+
+def roster_fingerprints(roster: list[RosterSlot]) -> dict[str, str]:
+    by_team: dict[str, list[str]] = {}
+    for s in roster:
+        at = s.available_at.strftime("%Y-%m-%dT%H:%M:%SZ") if s.available_at else "UNDATED"
+        by_team.setdefault(s.team, []).append(f"{s.player_id}:{s.position}:{s.proj_5v5_min}:{at}")
+    return {t: stable_digest(sorted(v), 16) for t, v in by_team.items()}
 
 
 @dataclass
@@ -48,12 +56,14 @@ def run_slate(
     seed: str = "nhl",
     created_at: datetime | None = None,
     constants: LeagueConstants | None = None,
+    simulated_clock: bool = False,
+    strict: bool = True,
 ) -> SlateRun:
     """``games`` are the slate's game ids as the caller knows them; the schedule is
     re-read from the view so the prices use the version known at ``as_of``.
     ``constants``: walk-forward league constants for ``season`` (fit here if absent)."""
 
-    view = store.view(as_of)
+    view = store.view(as_of, strict=strict)
     known = {g.game_id: g for g in view.games()}
     skipped: list[tuple[str, str]] = []
     slate: list[Game] = []
@@ -81,6 +91,7 @@ def run_slate(
     priced, errors = price_slate(view, slate, ratings, n_sims=n_sims, seed=game_seed(seed, as_of.isoformat()), sim_cfg=sim_cfg)
     artifacts = build_artifacts(
         view, priced, view.odds_snapshots({g.game_id for g in slate}), health, mode, created_at=created_at or utcnow(),
-        constants_id=constants.constants_id, extra_provenance_blocks=extra_blocks,
+        extra_provenance_blocks=extra_blocks, constants=constants, roster_fingerprints=roster_fingerprints(roster),
+        parameter_fingerprint=ratings_fingerprint(ratings), simulated_clock=simulated_clock,
     )
     return SlateRun(view, ratings, health, priced, errors, artifacts, constants, skipped)

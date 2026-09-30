@@ -7,21 +7,28 @@ from nhl.governance.lanes import GovernanceError, assert_allowed, decide
 from nhl.ledger.bets import BetLedger, LedgerError, Placement
 from nhl.ledger.clv import compute_clv
 from nhl.ledger.grading import settle
-from nhl.ledger.predictions import ArtifactError, PredictionArtifact, PredictionStore
+from nhl.ledger.predictions import SCHEMA_VERSION, ArtifactError, PredictionArtifact, PredictionStore, state_fingerprint
 
 
 def artifact(**kw) -> PredictionArtifact:
+    # v2 field names (Phase 2: the single "edge" field was split into the explicit chain).
     base = dict(
-        prediction_id="P:1", created_at="2026-10-07T20:00:00Z", as_of="2026-10-07T20:00:00Z",
-        puck_drop="2026-10-07T23:00:00Z", mode="FORWARD", data_origin="LIVE", game_id="2026020001",
-        market="ML", selection="HOME", line=None, team=None, market_key="2026020001:ML:HOME",
-        sportsbook="booka", market_price=-120, market_observed_at="2026-10-07T19:55:00Z",
-        no_vig_probability=0.53, model_probability=0.56, model_p_win=0.56, model_p_push=0.0,
-        fair_price=-127, edge=0.03, ev_per_unit=0.026, goalie_state="HOME:CONFIRMED(1@0.985)|AWAY:UNKNOWN(2@0.7)",
-        lineup_state="UNKNOWN", model_version="m", feature_version="f", config_hash="c",
-        data_snapshot_id="DS:x", health_score=1.0, status="UNVALIDATED", shadow_lane="WATCH", reason_codes="[]",
+        prediction_id="P:1", schema_version=SCHEMA_VERSION, created_at="2026-10-07T20:00:00Z", as_of="2026-10-07T20:00:00Z",
+        puck_drop="2026-10-07T23:00:00Z", mode="FORWARD", data_origin="LIVE", evidence_lane="SHADOW_FORWARD",
+        game_id="2026020001", market="ML", period="FULL_GAME", selection="HOME", line=None, team=None, participant=None,
+        market_key="2026020001:ML:HOME", market_id="2026020001:ML", sportsbook="booka", provider="v",
+        market_snapshot_ref="HOME@2026-10-07T19:55:00Z#x", market_observed_at="2026-10-07T19:55:00Z", quote_age_minutes=5.0,
+        execution_price=-120, execution_decimal=1.83333333, raw_implied_probability=0.54545455, no_vig_probability=0.53,
+        novig_method="multiplicative", market_overround=0.03, model_probability=0.56, model_p_win=0.56, model_p_push=0.0,
+        model_fair_price=-127, model_fair_decimal=1.78571429, probability_edge=0.03, fair_price_edge=0.026667,
+        ev_per_unit=0.026, goalie_state="HOME:CONFIRMED(1@0.985)|AWAY:UNKNOWN(2@0.7)", goalie_fingerprint="G:x",
+        lineup_state="UNKNOWN", roster_fingerprint="R:x", model_version="m", feature_version="f",
+        parameter_fingerprint="PR:x", constants_id="LC:x", default_constants="[]", config_hash="c",
+        data_snapshot_id="DS:x", health_score=1.0, status="UNVALIDATED", shadow_lane="WATCH",
+        eligibility="EVALUATION_ONLY", block_reasons="[]", reason_codes="[]", state_fingerprint="",
     )
     base.update(kw)
+    base["state_fingerprint"] = state_fingerprint(base)
     return PredictionArtifact(**base)
 
 
@@ -33,14 +40,14 @@ def test_artifacts_append_only_and_chained(tmp_path):
     with pytest.raises(ArtifactError):
         store.append([artifact(model_probability=0.9)], now="2026-10-07T20:00:02Z")  # silent rewrite refused
     with pytest.raises(sqlite3.DatabaseError):
-        store.conn.execute("UPDATE predictions SET edge = 0.5")
+        store.conn.execute("UPDATE predictions SET probability_edge = 0.5")
     with pytest.raises(sqlite3.DatabaseError):
         store.conn.execute("DELETE FROM predictions")
     ok, _ = store.verify_chain()
     assert ok
     # Tamper out-of-band: drop the trigger and edit -> chain verification fails.
     store.conn.execute("DROP TRIGGER predictions_no_update")
-    store.conn.execute("UPDATE predictions SET edge = 0.5 WHERE prediction_id = 'P:1'")
+    store.conn.execute("UPDATE predictions SET probability_edge = 0.5 WHERE prediction_id = 'P:1'")
     store.conn.commit()
     ok, why = store.verify_chain()
     assert not ok and "hash mismatch" in why
@@ -48,11 +55,11 @@ def test_artifacts_append_only_and_chained(tmp_path):
 
 def test_negative_zero_and_nan_round_trip_safety(tmp_path):
     store = PredictionStore(tmp_path / "z.sqlite")
-    store.append([artifact(ev_per_unit=-0.0, edge=-0.0)], now="2026-10-07T20:00:01Z")
+    store.append([artifact(ev_per_unit=-0.0, probability_edge=-0.0)], now="2026-10-07T20:00:01Z")
     assert store.verify_chain()[0]
-    assert store.append([artifact(ev_per_unit=-0.0, edge=-0.0)], now="2026-10-07T20:00:02Z")["skipped_identical"] == 1
+    assert store.append([artifact(ev_per_unit=-0.0, probability_edge=-0.0)], now="2026-10-07T20:00:02Z")["skipped_identical"] == 1
     with pytest.raises(ArtifactError):
-        store.append([artifact(prediction_id="P:nan", edge=float("nan"))], now="2026-10-07T20:00:02Z")
+        store.append([artifact(prediction_id="P:nan", probability_edge=float("nan"))], now="2026-10-07T20:00:02Z")
 
 
 def test_forward_artifacts_rejected_after_puck_drop(tmp_path):

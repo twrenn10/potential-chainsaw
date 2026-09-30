@@ -180,6 +180,7 @@ class GoalieReport:
     source: str
     available_at: datetime
     provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
+    confidence: float | None = None  # source-stated confidence in [0, 1], if any
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "game_id", canonical_game_id(self.game_id))

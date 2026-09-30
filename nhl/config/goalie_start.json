@@ -10,5 +10,12 @@
     "b_rest": 0.15,
     "recent_starts_window": 20,
     "share_prior_starts": 4.0
+  },
+  "p_start_expected": 0.93,
+  "p_start_probable": 0.9,
+  "stale_report_hours": {
+    "value": 30,
+    "_status": "PROVISIONAL",
+    "_doc": "A report available more than this many hours before puck drop is stale: it is not used to name a starter and is flagged."
   }
 }

@@ -1,19 +1,78 @@
 {
-  "_doc": "PREDETERMINED walk-forward gates (Phase 1C). Changing these after looking at results invalidates the test; bump gate_version and log the reason instead.",
-  "gate_version": "2026.09.25-v1",
+  "_doc": "Predetermined validation gates. gate_version bumped from 2026.09.25-v1 on 2026-09-30 to ADD evidence criteria (lanes, CLV, close availability, provenance, integrity, reproducibility, leakage); no v1 threshold was loosened. Every numeric threshold is PROVISIONAL: an operational choice, not a scientifically established value. ROI is never a gate criterion. Changing any value requires a new gate_version and a logged reason.",
+  "gate_version": "2026.09.30-v2",
+  "previous_gate_version": "2026.09.25-v1",
+  "eligible_evidence_lanes": [
+    "STRICT_WALK_FORWARD",
+    "SHADOW_FORWARD"
+  ],
+  "promotion_evidence_lane": "SHADOW_FORWARD",
   "defaults": {
-    "min_scored_games": 1000,
-    "max_delta_logloss_vs_close": 0.0,
-    "calibration_slope_range": [0.85, 1.15],
-    "max_ece": 0.025,
-    "blend_weight_ci_lower_gt": 0.0,
-    "bootstrap_reps": 1000
+    "min_scored_games": {
+      "value": 1000,
+      "status": "PROVISIONAL"
+    },
+    "max_delta_logloss_vs_close": {
+      "value": 0.0,
+      "status": "PROVISIONAL"
+    },
+    "calibration_slope_range": {
+      "value": [
+        0.85,
+        1.15
+      ],
+      "status": "PROVISIONAL"
+    },
+    "calibration_intercept_abs_max": {
+      "value": 0.1,
+      "status": "PROVISIONAL"
+    },
+    "max_ece": {
+      "value": 0.025,
+      "status": "PROVISIONAL"
+    },
+    "blend_weight_ci_lower_gt": {
+      "value": 0.0,
+      "status": "PROVISIONAL"
+    },
+    "min_close_availability": {
+      "value": 0.95,
+      "status": "PROVISIONAL"
+    },
+    "clv_ci_lower_gt": {
+      "value": 0.0,
+      "status": "PROVISIONAL"
+    },
+    "min_clv_samples": {
+      "value": 300,
+      "status": "PROVISIONAL"
+    },
+    "min_mean_health": {
+      "value": 0.95,
+      "status": "PROVISIONAL"
+    },
+    "bootstrap_reps": {
+      "value": 1000,
+      "status": "PROVISIONAL"
+    }
   },
+  "required_checks": [
+    "ARTIFACT_CHAIN_VERIFIED",
+    "LEAKAGE_EQUIVALENCE",
+    "DETERMINISTIC_RERUN",
+    "NO_PROVENANCE_BLOCKS"
+  ],
   "markets": {
     "ML": {},
     "REG_3WAY": {},
     "PUCK_LINE": {},
     "TOTAL": {},
-    "TEAM_TOTAL": {}
+    "TEAM_TOTAL": {},
+    "GOALIE_SAVES": {
+      "not_priced": true
+    },
+    "PLAYER_SOG": {
+      "not_priced": true
+    }
   }
 }

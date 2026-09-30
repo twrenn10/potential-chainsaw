@@ -97,9 +97,16 @@ class GoalieState(str, Enum):
     starter-certainty rule).
     """
 
-    CONFIRMED = "CONFIRMED"
-    PROJECTED = "PROJECTED"
+    CONFIRMED = "CONFIRMED"  # team/beat confirmation (e.g. after morning skate)
+    EXPECTED = "EXPECTED"  # strong report short of confirmation
+    PROBABLE = "PROBABLE"  # coach/source indicates likely starter
+    PROJECTED = "PROJECTED"  # aggregator projection
+    SCRATCHED = "SCRATCHED"  # this goalie will NOT start (replaced / scratched / injured)
     UNKNOWN = "UNKNOWN"
+
+    @property
+    def rank(self) -> int:
+        return {"CONFIRMED": 4, "EXPECTED": 3, "PROBABLE": 2, "PROJECTED": 1}.get(self.value, 0)
 
 
 class LineupState(str, Enum):
@@ -132,3 +139,35 @@ class DataOrigin(str, Enum):
     LIVE = "LIVE"
     HISTORICAL = "HISTORICAL"
     SYNTHETIC = "SYNTHETIC"
+    FIXTURE = "FIXTURE"  # real-format fixtures: structural testing only, treated like SYNTHETIC
+
+
+class EvidenceLane(str, Enum):
+    """What kind of evidence a prediction is (separate from the action lane).
+
+    * DEV_SYNTHETIC       -- synthetic/fixture data or a simulated clock. Never actionable,
+                             never counted as forward evidence.
+    * HISTORICAL_RESEARCH -- real historical data whose point-in-time provenance is
+                             incomplete (non-strict view, non-causal/unattested inputs).
+                             Research only; never presented as walk-forward evidence.
+    * STRICT_WALK_FORWARD -- historical evaluation where every input met the causal
+                             as_of standard. Eligible for model evaluation only.
+    * SHADOW_FORWARD      -- produced in real time before the event from contemporaneous
+                             data, with clean provenance. The key Phase 2 validation lane.
+    * FORWARD_DEGRADED    -- produced in real time but with provenance/data defects;
+                             logged for audit, not counted as shadow-forward evidence.
+    """
+
+    DEV_SYNTHETIC = "DEV_SYNTHETIC"
+    HISTORICAL_RESEARCH = "HISTORICAL_RESEARCH"
+    STRICT_WALK_FORWARD = "STRICT_WALK_FORWARD"
+    SHADOW_FORWARD = "SHADOW_FORWARD"
+    FORWARD_DEGRADED = "FORWARD_DEGRADED"
+
+
+class Eligibility(str, Enum):
+    INELIGIBLE_DEV = "INELIGIBLE_DEV"
+    INELIGIBLE_BLOCKED = "INELIGIBLE_BLOCKED"
+    RESEARCH_ONLY = "RESEARCH_ONLY"
+    EVALUATION_ONLY = "EVALUATION_ONLY"  # counts as evidence; not actionable
+    ACTIONABLE_ELIGIBLE = "ACTIONABLE_ELIGIBLE"
