@@ -113,10 +113,10 @@ def test_pit_hides_future_results_and_assert_visible(fixtures):
 
 
 def test_quality_gates(fixtures):
-    games = nhl_api.parse_schedule(
-        json.loads((fixtures / "nhl_schedule.json").read_text()),
-        type("E", (), {"fetched_at": parse_ts("2026-09-01T00:00:00Z")})(),
-    )
+    from nhl.data.snapshots import SnapshotEntry
+
+    entry = SnapshotEntry("nhl_api:x", "nhl_api", "schedule/2026-10-07", parse_ts("2026-09-01T00:00:00Z"), "x", 1, {})
+    games = nhl_api.parse_schedule(json.loads((fixtures / "nhl_schedule.json").read_text()), entry)
     odds, _ = parse_odds_csv((fixtures / "odds_sample.csv").read_bytes())
     store = HistoricalStore(games=games, odds=odds)
     rep = evaluate_slate(store.view("2026-10-07T22:45:00Z"), ["2026020001"], teams_with_prior={"TOR", "MTL"})
