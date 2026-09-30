@@ -46,6 +46,15 @@ def test_artifacts_append_only_and_chained(tmp_path):
     assert not ok and "hash mismatch" in why
 
 
+def test_negative_zero_and_nan_round_trip_safety(tmp_path):
+    store = PredictionStore(tmp_path / "z.sqlite")
+    store.append([artifact(ev_per_unit=-0.0, edge=-0.0)], now="2026-10-07T20:00:01Z")
+    assert store.verify_chain()[0]
+    assert store.append([artifact(ev_per_unit=-0.0, edge=-0.0)], now="2026-10-07T20:00:02Z")["skipped_identical"] == 1
+    with pytest.raises(ArtifactError):
+        store.append([artifact(prediction_id="P:nan", edge=float("nan"))], now="2026-10-07T20:00:02Z")
+
+
 def test_forward_artifacts_rejected_after_puck_drop(tmp_path):
     store = PredictionStore(tmp_path / "p.sqlite")
     with pytest.raises(ArtifactError):

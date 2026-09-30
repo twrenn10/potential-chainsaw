@@ -15,6 +15,7 @@ table:
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -79,8 +80,15 @@ def make_prediction_id(game_id: str, market_key: str, sportsbook: str, as_of: st
     return "P:" + stable_digest([game_id, market_key, sportsbook, as_of, model_version, mode], n=20)
 
 
+def _norm(value: Any) -> Any:
+    # SQLite REAL cannot store -0.0 (reads back 0.0); hash what survives the round trip.
+    if isinstance(value, float) and value == 0.0:
+        return 0.0
+    return value
+
+
 def _canonical(content: dict[str, Any]) -> str:
-    return json.dumps(content, sort_keys=True, separators=(",", ":"), default=str)
+    return json.dumps({k: _norm(v) for k, v in content.items()}, sort_keys=True, separators=(",", ":"), default=str)
 
 
 class PredictionStore:
@@ -129,6 +137,9 @@ class PredictionStore:
                 if a.mode == PredictionMode.FORWARD.value and (created >= drop or wall >= drop):
                     raise ArtifactError(f"{a.prediction_id}: forward prediction written at/after puck drop")
                 content = a.content()
+                bad = [k for k, v in content.items() if isinstance(v, float) and not math.isfinite(v)]
+                if bad:
+                    raise ArtifactError(f"{a.prediction_id}: non-finite values in {bad} (would not round-trip SQLite)")
                 existing = self.conn.execute(
                     f"SELECT {', '.join(COLUMNS)} FROM predictions WHERE prediction_id = ?", (a.prediction_id,)
                 ).fetchone()

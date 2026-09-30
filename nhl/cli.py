@@ -3,6 +3,8 @@
   python -m nhl.cli demo --out out/demo            # synthetic end-to-end run (offline)
   python -m nhl.cli verify --db out/demo/predictions.sqlite
   python -m nhl.cli fetch-schedule --date 2026-10-07 --store store/   # live NHL API
+  python -m nhl.cli capture --date 2026-10-07 --store store/ --rosters TOR,MTL --season 2026
+  python -m nhl.cli replay --store store/ --out out/ingest
 """
 
 from __future__ import annotations
@@ -110,6 +112,28 @@ def cmd_fetch_schedule(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_capture(args: argparse.Namespace) -> int:
+    from nhl.data.ingest import capture_day
+    from nhl.data.nhl_api import NHLApiClient
+    from nhl.data.snapshots import RawSnapshotStore
+
+    client = NHLApiClient(RawSnapshotStore(args.store))
+    teams = [t.strip() for t in args.rosters.split(",") if t.strip()] if args.rosters else []
+    for e in capture_day(client, date.fromisoformat(args.date), roster_teams=teams, season=args.season):
+        print(e.snapshot_id, e.key, e.fetched_at.isoformat())
+    return 0
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    from nhl.data.ingest import replay
+    from nhl.data.snapshots import RawSnapshotStore
+
+    store, rep = replay(RawSnapshotStore(args.store))
+    paths = rep.write(args.out)
+    print(json.dumps({"games": len(store.games), "results": len(store.results), "odds": len(store.odds), **paths}, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="nhl")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -130,6 +154,16 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--date", required=True)
     f.add_argument("--store", default="store")
     f.set_defaults(fn=cmd_fetch_schedule)
+    c = sub.add_parser("capture", help="live capture: schedule, finals, optional rosters (network)")
+    c.add_argument("--date", required=True)
+    c.add_argument("--store", default="store")
+    c.add_argument("--rosters", default="", help="comma-separated team codes")
+    c.add_argument("--season", type=int, default=None)
+    c.set_defaults(fn=cmd_capture)
+    r = sub.add_parser("replay", help="rebuild a provenanced store from raw snapshots + ingest report")
+    r.add_argument("--store", default="store")
+    r.add_argument("--out", default="out/ingest")
+    r.set_defaults(fn=cmd_replay)
     args = parser.parse_args(argv)
     return int(args.fn(args))
 
