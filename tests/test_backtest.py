@@ -71,8 +71,6 @@ def test_desk_export_is_deterministic(league, tmp_path):
 
 
 def test_postponed_game_skipped_then_priced_on_new_date(league, tmp_path):
-    from nhl.contracts import Game
-
     store = league.store
     days = slate_days([g for g in store.games if g.season == 2025])
     day = date(2025, 11, 12)
