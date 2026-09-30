@@ -33,6 +33,11 @@ Each ingested record carries a `Provenance` (`nhl/data/provenance.py`) built by 
 
 A capture declared `LIVE` but made after the relevant reference instant (usually puck drop) is automatically treated as a backfill.
 
+## Market observations and goalie reports (Phase 2 additions)
+- Market-v2 rows carry `source_ts` (provider change time, ≤ observed), `observed_at` (= `available_at`) and fetch time (`provenance.fetched_at`). All three are validated for order. See odds_and_close_methodology.md.
+- Goalie reports carry `published_at` (source time), fetch time and optional confidence. Lineage (every report considered) is hashed into each artifact's `goalie_fingerprint`. See goalie_information_lineage.md.
+- Evidence lanes turn provenance into eligibility: DEV_SYNTHETIC / HISTORICAL_RESEARCH / STRICT_WALK_FORWARD / SHADOW_FORWARD / FORWARD_DEGRADED (governance_gates.md).
+
 ## The two failure modes this prevents
 1. **Today's fetch time used as evidence that old information was unavailable.** An event fact backfilled today keeps its historical `available_at` (`min(fetched_at, event bound)`), so historical backtests are not starved.
 2. **Information treated as historically available merely because it exists in the database today.** Anything whose historical value depends on when it was fetched (third-party model output, un-timestamped reports, rosters, backfilled schedules) is non-causal unless a contemporaneous capture, a source timestamp, or a documented override proves otherwise.

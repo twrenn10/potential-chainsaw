@@ -15,6 +15,10 @@
 - Phase 1: nothing leaves `UNVALIDATED`/`BLOCKED`. `ACTIONABLE` is refused in code.
 - Prediction artifacts are append-only (`nhl.ledger.predictions`); never edit or delete rows.
 - No letter confidence grades.
+- Keep the pricing chain distinct (raw implied vs no-vig, probability edge vs EV vs execution price); never reintroduce a single `edge` field.
+- One close rule (`close-v1` in `nhl/config/market.json`); unavailable closes are never substituted.
+- Prices must be a function of information, not the clock: no `as_of`-derived seeds or decay anchors; reprices go through `append_if_changed`.
+- Synthetic/fixture/simulated-clock output is DEV_SYNTHETIC and hard-blocked; only STRICT_WALK_FORWARD / SHADOW_FORWARD rows count for gates.
 - Validation gates in `nhl/config/validation_gates.json` are predetermined; changing them requires a new `gate_version`.
 
 ## Validation

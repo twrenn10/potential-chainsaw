@@ -104,7 +104,7 @@ What was deliberately **not** reused:
 - **Rink scorekeeper SOG factors** (`features/rink.py`). Built for Phase 1D and not wired into game pricing.
 
 ## 4. Data-source inventory
-See [data_sources.md](data_sources.md). The NHL API and MoneyPuck are blocked by this environment's network policy, so ingestion is fixture-tested and the end-to-end run is synthetic.
+See [data_source_inventory.md](data_source_inventory.md). The NHL API and MoneyPuck are blocked by this environment's network policy, so ingestion is fixture-tested and the end-to-end run is synthetic.
 
 ## 5. Leakage audit
 See [leakage_audit.md](leakage_audit.md). The central guarantee is tested directly: predictions are byte-identical with the future present in the store versus physically removed. Residual items R1–R4 are open.

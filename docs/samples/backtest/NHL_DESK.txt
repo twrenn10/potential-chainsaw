@@ -1,0 +1,46 @@
+NHL DESK - 2026-01-20
+
+PIPELINE: READY
+GAMES: 5
+MARKETS: 65
+
+LANES BLOCKED 65
+SHADOW (not actionable) MODEL_PLUS 6  WATCH 14  PASS 45
+
+GOALIES confirmed 2  projected 2  unknown 6
+DATA HEALTH 96.7%
+
+BUF @ NSH  (2026-01-20 23:00Z)  P(OT)=0.222  E[total]=6.15
+  goalies: HOME:UNKNOWN(8470610@0.717)|AWAY:CONFIRMED(8470582@0.985)
+  TEAM_TOTAL BUF UNDER +2.5  px  +160  raw 0.385  nv 0.368  model 0.407  fair  +146  p-edge +3.8%  EV +5.7%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+  TOTAL UNDER +6.5           px  -117  raw 0.539  nv 0.515  model 0.552  fair  -123  p-edge +3.6%  EV +2.3%  [BLOCKED | INELIGIBLE_DEV | shadow MODEL_PLUS]
+  TEAM_TOTAL NSH OVER +2.5   px  -163  raw 0.620  nv 0.593  model 0.629  fair  -169  p-edge +3.6%  EV +1.4%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+  ML HOME                    px  -107  raw 0.517  nv 0.495  model 0.526  fair  -111  p-edge +3.2%  EV +1.8%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+
+WSH @ DET  (2026-01-20 23:00Z)  P(OT)=0.225  E[total]=6.27
+  goalies: HOME:CONFIRMED(8470595@0.985)|AWAY:PROJECTED(8470639@0.880)
+  ML HOME                    px  +105  raw 0.488  nv 0.468  model 0.557  fair  -126  p-edge +8.9%  EV +14.1%  [BLOCKED | INELIGIBLE_DEV | shadow MODEL_PLUS]
+  TEAM_TOTAL DET OVER +2.5   px  -184  raw 0.648  nv 0.620  model 0.666  fair  -199  p-edge +4.6%  EV +2.8%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+  REG_3WAY HOME              px  +137  raw 0.422  nv 0.402  model 0.441  fair  +127  p-edge +3.9%  EV +4.5%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+  TOTAL OVER +6.5            px  +120  raw 0.455  nv 0.435  model 0.469  fair  +113  p-edge +3.4%  EV +3.3%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+
+OTT @ COL  (2026-01-21 02:00Z)  P(OT)=0.222  E[total]=6.39
+  goalies: HOME:UNKNOWN(8470591@0.549)|AWAY:UNKNOWN(8470616@0.800)
+  TEAM_TOTAL COL UNDER +2.5  px  +200  raw 0.333  nv 0.319  model 0.363  fair  +175  p-edge +4.4%  EV +9.0%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+  TOTAL OVER +6.5            px  +110  raw 0.476  nv 0.456  model 0.490  fair  +104  p-edge +3.4%  EV +2.9%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+  REG_3WAY HOME              px  +165  raw 0.377  nv 0.359  model 0.388  fair  +158  p-edge +2.8%  EV +2.7%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+  PUCK_LINE AWAY +1.5        px  -301  raw 0.751  nv 0.718  model 0.735  fair  -277  p-edge +1.6%  EV -2.1%  [BLOCKED | INELIGIBLE_DEV | shadow PASS]
+
+CGY @ EDM  (2026-01-21 02:00Z)  P(OT)=0.222  E[total]=6.17
+  goalies: HOME:PROJECTED(8470597@0.880)|AWAY:UNKNOWN(8470588@0.599)
+  ML HOME                    px  -111  raw 0.526  nv 0.503  model 0.577  fair  -136  p-edge +7.3%  EV +9.6%  [BLOCKED | INELIGIBLE_DEV | shadow MODEL_PLUS]
+  TEAM_TOTAL CGY UNDER +2.5  px  +155  raw 0.392  nv 0.375  model 0.443  fair  +126  p-edge +6.8%  EV +13.0%  [BLOCKED | INELIGIBLE_DEV | shadow MODEL_PLUS]
+  PUCK_LINE HOME -1.5        px  +222  raw 0.311  nv 0.297  model 0.331  fair  +202  p-edge +3.3%  EV +6.4%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+  REG_3WAY AWAY              px  +232  raw 0.301  nv 0.287  model 0.317  fair  +215  p-edge +3.0%  EV +5.3%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+
+WPG @ SJS  (2026-01-21 02:00Z)  P(OT)=0.223  E[total]=6.19
+  goalies: HOME:UNKNOWN(8470624@0.549)|AWAY:UNKNOWN(8470637@0.565)
+  TOTAL OVER +6.5            px  +139  raw 0.418  nv 0.400  model 0.455  fair  +120  p-edge +5.5%  EV +8.7%  [BLOCKED | INELIGIBLE_DEV | shadow MODEL_PLUS]
+  REG_3WAY AWAY              px  +179  raw 0.358  nv 0.341  model 0.394  fair  +154  p-edge +5.2%  EV +9.8%  [BLOCKED | INELIGIBLE_DEV | shadow MODEL_PLUS]
+  PUCK_LINE AWAY +1.5        px  -268  raw 0.728  nv 0.697  model 0.734  fair  -275  p-edge +3.7%  EV +0.7%  [BLOCKED | INELIGIBLE_DEV | shadow WATCH]
+  TEAM_TOTAL WPG UNDER +2.5  px  +168  raw 0.373  nv 0.357  model 0.383  fair  +161  p-edge +2.6%  EV +2.7%  [BLOCKED | INELIGIBLE_DEV | shadow PASS]

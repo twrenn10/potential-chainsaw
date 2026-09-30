@@ -2,7 +2,7 @@
 
 Principle: every record carries `available_at` and, in Phase 2, a `Provenance` stating the rule that produced it (see [temporal_provenance.md](temporal_provenance.md)). Model and feature code reads history only through a **strict** `nhl.data.pit.PointInTimeView`. Evaluation data is read only by `nhl.backtest.evaluate`, after predictions are stored.
 
-**Enforcement test:** `tests/test_backtest.py::test_future_data_cannot_change_predictions`. Artifacts built from the full store are byte-identical to those built from a store physically truncated at `as_of`. Since Phase 2 this also covers league constants and roster snapshots.
+**Enforcement tests:** `tests/test_backtest.py::test_future_data_cannot_change_predictions` and the `nhl leakage-audit` command / `nhl.backtest.leakage.audit`, which also truncates schedule versions and roster snapshots. Artifacts built from the full store are byte-identical to those built from a store physically truncated at `as_of`. Since Phase 2 this also covers league constants and roster snapshots.
 
 | # | Channel | Rule | Status |
 |---|---|---|---|
@@ -22,4 +22,10 @@ Principle: every record carries `available_at` and, in Phase 2, a `Provenance` s
 | **3B** | **League constants** (was R2) | `fit_league_constants`: seasons completed before S, strict view at Sep 1 of S, rolling window, per-constant FIT/DEFAULT provenance, persisted write-once with content id stamped into artifacts. The pipeline refuses constants from another season | **Closed** for rate_5v5, rate_pp, penalty_rate, rate_3v3, shootout_home_prob. Pull timing, empty-net, 6v5, SH, 4v4 and score-effect constants remain labelled static defaults (not fit from any season, so no leakage, but unvalidated) |
 | **3C** | **Rosters** (was R3) | `RosterSlot.available_at` + provenance. Priors use the latest snapshot at `as_of`. Undated rosters are hard-blocked for real data. The roster endpoint is live-capture only | **Closed in code.** Historical rosters cannot be reconstructed from the endpoint; a transaction-level source is needed for pre-2026 backtests |
 | **3D** | **Postponements** (was R4) | Schedule versions; views return the version known at `as_of`; PPD/SUSP/CNCL are not priced; slates are built from every version | **Closed** for live-captured schedules. Remains a residual inside seasons whose schedule is backfilled through an override |
-| R5 | Synthetic data | Circular by design | Always BLOCKED; gates ineligible |
+| R5 | Synthetic data | Circular by design | Always BLOCKED (DEV_SYNTHETIC); gates ineligible |
+| 13 | Clock dependence (Phase 2 fix) | Simulation seed, rating decay and per-game random streams are functions of the information state, not `as_of` or other games. Identical information gives identical artifacts | Fixed + tested (`test_forward_lifecycle`) |
+| 14 | Closing line | close-v1 uses only observations strictly before the cutoff (actual, else scheduled, labelled). Suspended/incomplete/stale closes are UNAVAILABLE, never substituted | Enforced + tested |
+| 15 | Goalie lineage | Only reports visible at `as_of`; stale, conflicting and scratched reports handled explicitly; later confirmations create new artifacts, never edits | Enforced + tested |
+| 16 | Evidence lanes | Synthetic/fixture/simulated-clock → DEV; non-strict or provenance defects → HISTORICAL_RESEARCH / FORWARD_DEGRADED; only clean lanes count toward gates | Enforced + tested |
+| R6 | Default simulator constants | 8 constants (rate_sh, rate_6v5_attack, rate_empty_net, rate_4v4_mult, score_effect_beta, score_effect_beta_p3, pull_trailing_by_1/2_seconds) are static defaults. They are never fit on any season, so there is no leakage, but they are unvalidated. They are listed in every artifact's `default_constants` and hashed via `constants_id` | Open (needs event-level fits on prior seasons) |
+| R7 | Actual puck-drop time | No source currently provides it, so every close uses the labelled SCHEDULED_FALLBACK | Open |

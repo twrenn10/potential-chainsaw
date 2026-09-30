@@ -1,5 +1,7 @@
 # Data-source inventory
 
+Status key: **parser implemented · fixture-validated · live validation BLOCKED** applies to every NHL API / MoneyPuck row below. No live payload has been captured from this environment.
+
 | Source | What | Access | Grain / timestamp | Status in repo |
 |---|---|---|---|---|
 | NHL API `api-web.nhle.com/v1/schedule/{date}` | Schedule, venues, start times | Public, undocumented | Game; `fetched_at` of snapshot | Client + parser + fixture tests |
@@ -11,8 +13,8 @@
 | MoneyPuck team game-by-game CSV | 5on5 / 5on4 / all: xG, goals, SOG, penalties, TOI | Free download (check terms) | Team-game-situation; next day 12:00 UTC | Parser + schema check; **verify `penaltiesFor` semantics** |
 | MoneyPuck goalie game-by-game CSV | xGA, GA, shots on goal, TOI | Free download | Goalie-game; next day | Parser (starter inferred by TOI, flagged) |
 | MoneyPuck skater season CSV | 5v5 on-ice xGF/xGA for player priors | Free download | Player-season; July 1 after season | Parser |
-| Odds feed (vendor TBD) | ML, 3-way, puck line, totals, team totals by book, with limits | **Paid (needed)** | Observation timestamp | Canonical CSV schema, parser, dedupe, PIT view, de-vig, close/open/marks |
-| Goalie confirmations (DailyFaceoff, beat reporters, or vendor) | Starter state with report time | Scrape or paid; **check ToS** | Report timestamp | Canonical CSV schema and parser |
+| Odds feed (vendor TBD) | ML, 3-way, puck line, totals, team totals, goalie saves, player SOG by book, with limits | **Paid (needed; none configured)** | provider `source_ts` ≤ `observed_at` ≤ fetch | Market-v2 contract + provider interface (`nhl/market/providers.py`), parser, no-vig, close-v1, close store, replay. Fixture-only |
+| Goalie confirmations (DailyFaceoff, beat reporters, or vendor) | Starter state (CONFIRMED/EXPECTED/PROBABLE/PROJECTED/SCRATCHED) with publication time and optional confidence | Scrape or paid; **check ToS**; none configured | Publication timestamp | Checked parser, provenance, lineage and conflict handling, provider interface. Fixture-only |
 | Line combinations / lineups | Lineup state | TBD | Timestamp | Not implemented (`lineup_state=UNKNOWN`) |
 
 ## Validation status (Phase 2)

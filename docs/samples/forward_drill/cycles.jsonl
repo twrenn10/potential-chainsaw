@@ -1,0 +1,6 @@
+{"constants_id": "LC:67c7cb02a1bcdc94", "day": "2026-01-20", "errors": [], "event": "PRICE", "games": 5, "inserted": 65, "now": "2026-01-20T14:00:00Z", "simulated_clock": true, "skipped": [], "skipped_identical": 0, "unchanged_state": 0}
+{"constants_id": "LC:67c7cb02a1bcdc94", "day": "2026-01-20", "errors": [], "event": "PRICE", "games": 5, "inserted": 0, "now": "2026-01-20T14:30:00Z", "simulated_clock": true, "skipped": [], "skipped_identical": 0, "unchanged_state": 65}
+{"constants_id": "LC:67c7cb02a1bcdc94", "day": "2026-01-20", "errors": [], "event": "PRICE", "games": 5, "inserted": 65, "now": "2026-01-20T20:30:00Z", "simulated_clock": true, "skipped": [], "skipped_identical": 0, "unchanged_state": 0}
+{"constants_id": "LC:67c7cb02a1bcdc94", "day": "2026-01-20", "errors": [], "event": "PRICE", "games": 5, "inserted": 26, "now": "2026-01-20T21:50:00Z", "simulated_clock": true, "skipped": [], "skipped_identical": 0, "unchanged_state": 39}
+{"constants_id": "LC:67c7cb02a1bcdc94", "day": "2026-01-20", "errors": [], "event": "PRICE", "games": 5, "inserted": 39, "now": "2026-01-20T22:20:00Z", "simulated_clock": true, "skipped": [], "skipped_identical": 0, "unchanged_state": 26}
+{"available": 30, "day": "2026-01-20", "event": "CLOSE", "games": 5, "inserted": 30, "now": "2026-01-21T07:00:00Z", "skipped_identical": 0, "unavailable": 0}

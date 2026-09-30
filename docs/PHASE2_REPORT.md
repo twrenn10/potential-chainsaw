@@ -1,55 +1,156 @@
-# NHL Desk: Phase 2 report (2026-09-30)
+# NHL Desk: Phase 2 report
 
-Branch `claude/nhl-pricing-engine-e9tmet`, 9 commits after Phase 1 (`4b48aea` … the documentation commit).
+Branch `claude/nhl-pricing-engine-e9tmet`. Phase 2 has two parts:
+- **Part A** (2026-09-30, commits `4b48aea`…`09d2ad5`): real-data ingestion hardening, temporal provenance, leakage gaps 3A–3D.
+- **Part B** (commits `7dc7e1f`…HEAD): Priorities 4–14.
 
-**Scope note:** the Phase 2 mandate received was truncated partway through item 3B ("Persist…"). This report covers Priorities 1, 2, 3A and 3B as specified. It also covers the two remaining Phase 1 leakage gaps, rosters (3C) and postponements (3D), which are presumed to be the rest of Priority 3. Anything after that point in the mandate has not been seen or implemented.
+> **Verdict: LIVE FORWARD VALIDATION IS BLOCKED.** The architecture and the fixture-based lifecycle are complete. No live NHL, MoneyPuck, odds or goalie-report payload has ever been captured from this environment (`nhl capture-*` → `403 Forbidden` at the egress proxy), and no odds provider is configured.
+>
+> Status by layer:
+> - Parser implementation: **complete**.
+> - Fixture validation: **complete**.
+> - Live-source validation: **blocked**.
+> - Genuine CLV validation: **externally blocked** (no odds provider).
 
-**Real-data status: live sources are still unreachable from this environment** (`nhl capture` → `403 Forbidden` at the egress proxy). Every parser is validated against source-format fixtures only. **No real-data validation has occurred**, and nothing in this report should be read as such.
+---
 
-Governance is unchanged or stricter. Everything is still `UNVALIDATED` or `BLOCKED`, `ACTIONABLE` is still refused in code, and the model was not re-tuned. The synthetic metrics below are identical to Phase 1's within simulation noise.
+## Part A (summary; details in temporal_provenance.md and leakage_audit.md)
+- Checked parsers for NHL API schedule/pbp/boxscore/shifts/rosters and MoneyPuck. They reject bad records and never coerce.
+- Named provenance rules per information class; strict causal views by default.
+- MoneyPuck vintage governance, plus an in-house walk-forward xG model.
+- Walk-forward league constants, persisted write-once.
+- Timestamped roster snapshots; schedule versions and postponements.
+- Raw capture/replay.
+- Artifact hashing fix for `-0.0`; NaN/inf rejected.
+- Override registries included in the configuration fingerprint.
 
-## Priority 1: real NHL data ingestion
-| Item | Implementation |
-|---|---|
-| Validation primitives | `nhl/data/validation.py`: strict int/float/UTC/clock parsing, and `ParseResult` (records + rejections + warnings). No silent coercion (`"2.7"` is not an int, `NaN`/`inf` are not numbers, naive timestamps are rejected) |
-| Schedules | id/season/gameType consistency, explicit UTC start, `gameScheduleState` (OK/PPD/SUSP/CNCL; TBD rejected) and `gameState` mapping, unknown teams rejected, duplicate ids in one snapshot treated as ambiguous and dropped |
-| Play-by-play | Period/type/clock rules by game type, `situationCode` digit and skater sanity, event owner must be in the game, penalty duration, duplicate event ids |
-| Results | Only from final games with fully valid event streams, where the reconstructed score (including the shootout +1) **matches the payload score**. More than one OT goal is rejected. SOG mismatches are surfaced as warnings |
-| Goalies (boxscore) | Exactly one starter per team; `saveShotsAgainst` consistent with `goalsAgainst` |
-| Shifts / rosters | Shift start ≤ end; roster position codes per group; duplicate players rejected |
-| MoneyPuck | Strict numerics and ranges, season/date/id consistency, HOME/AWAY, team ≠ opponent, duplicate rows and tied-ice-time starters treated as ambiguous |
-| Odds / goalie reports | UTC timestamps, integer prices, observation not after fetch, conflicting same-instant prices dropped, starter reports must be pregame |
-| Capture / replay | `nhl/data/ingest.py`: `capture_day` (live job) and `replay` (deterministic rebuild of a provenanced `HistoricalStore` from raw snapshots, with `INGEST_summary.json` and `INGEST_anomalies.csv`). CLI: `nhl capture`, `nhl replay` |
+## Part B, priority by priority
 
-Source identity is preserved through `snapshot_id` (content hash) on every record, `source_version` (`api-web/v1`, model ids, capture dates), and the raw fetch manifest (URL, fetch time).
+### P4: Market data and no-vig close (odds_and_close_methodology.md)
+- **Observation contract (market-v2):** provider, `source_ts` ≤ `observed_at` ≤ fetch time, game, book, market, period, selection, line, team/participant, price in its original format (exact decimal kept), market status, max stake, provenance.
+- **Structurally distinct markets:** ML, REG_3WAY, PUCK_LINE, TOTAL, TEAM_TOTAL, GOALIE_SAVES, PLAYER_SOG. Keys are deterministic and include non-default periods and participants.
+- **No-vig:** explicit `NoVigResult` (raw implied, overround, method, exponent, inputs) for 2-way and 3-way markets. Malformed markets are rejected, never normalised.
+- **Close rule `close-v1`:** the last valid complete state strictly before actual puck drop, with a labelled scheduled-time fallback. Suspended, incomplete, non-contemporaneous, malformed or stale closes are `UNAVAILABLE`, never substituted.
+- Closes are persisted append-only and hash-chained, available or not.
+- The provider-neutral interface means a vendor adapter only emits market-v2.
 
-## Priority 2: temporal provenance
-See [temporal_provenance.md](temporal_provenance.md). Named rules per information class set `available_at` and `causal`. `PointInTimeView` is strict by default. Non-causal, unattested, undated-roster and non-strict use each produce a governance hard block and make evaluation gates ineligible. Backfill overrides live in documented registries, which are empty in this commit.
+### P5: Model edge vs betting edge
+Artifact schema v2 keeps the chain distinct:
+- `model_probability` → `model_fair_price`/`model_fair_decimal`;
+- `raw_implied_probability` → `no_vig_probability` (+ `novig_method`, `market_overround`);
+- `probability_edge`, `fair_price_edge`;
+- `execution_price`/`execution_decimal` → push-aware `ev_per_unit`;
+- `status`/`eligibility`/`block_reasons`.
 
-## Priority 3: the four leakage gaps
-| Gap | Resolution | Tests |
+There is no ambiguous `edge` field. Shadow `MODEL_PLUS` needs positive EV. Tests prove that a positive probability edge can be negative EV at -110, that vig changes attractiveness, and that stale or blocked rows cannot promote despite positive EV.
+
+### P6: Goalie lineage (goalie_information_lineage.md)
+- States: CONFIRMED / EXPECTED / PROBABLE / PROJECTED / SCRATCHED / UNKNOWN.
+- Each source's latest call is used. Conflicts are flagged and never treated as confirmed. Stale reports are flagged and ignored. Scratches zero out that goalie.
+- Every report considered is hashed into `goalie_fingerprint`. The mixture is deterministic, with common random numbers across a game's goalie pairs.
+- A later confirmation creates a new artifact and never mutates the old one (tested).
+
+### P7: Forward runner (forward_testing_protocol.md)
+- Scheduled invocations: price / close / settle / verify / export, with an append-only `cycles.jsonl`.
+- It uses the same `run_slate` as walk-forward and replay, with `ReplayStateSource` for production.
+- `append_if_changed` appends only when the state fingerprint changes. Identical reruns and clock-only cycles append nothing.
+
+### P8: Lanes (governance_gates.md)
+- Evidence lanes: DEV_SYNTHETIC / HISTORICAL_RESEARCH / STRICT_WALK_FORWARD / SHADOW_FORWARD / FORWARD_DEGRADED.
+- Eligibility states, and the action lane with hard blocks.
+- ACTIONABLE needs SHADOW_FORWARD evidence, passed gates, a phase change, positive EV and confirmed goalies. It is refused in code today.
+- Manual overrides are demotion-only and logged. Promotion requests are logged and refused.
+
+### P9: Market-by-market evaluation
+- Per market and per evidence lane: counts, Brier, log loss (model vs close), calibration intercept/slope, ECE, average predicted vs hit rate, average no-vig, model-minus-market, blend-weight CI, close availability.
+- Execution (paper, positive-EV rows): CLV mean/median/CI, positive-CLV rate, average execution decimal, average EV, realised ROI (secondary).
+- Props are reported as NOT_PRICED.
+
+### P10: Gates (`gate_version 2026.09.30-v2`, all thresholds **PROVISIONAL**)
+- Criteria: sample size, calibration slope/intercept, ECE, log loss vs close, blend-weight CI, CLV CI, close availability, mean health, provenance, eligible lanes only, chain/leakage/determinism checks.
+- ROI is never a criterion. Interpretation flags cover ROI vs CLV and calibration without market advantage.
+- The version was bumped from v1 to *add* criteria; no v1 threshold was loosened.
+
+### P11: Desk exports (`nhl/desk/reports.py`)
+- CURRENT_SLATE, PREDICTION_HISTORY, CLV_REPORT, GRADING_REPORT, GOVERNANCE_REPORT (with overrides), DATA_FRESHNESS (odds, schedule, goalie reports, rosters, team/player/event inputs), and a manifest.
+- Byte-identical across reruns (tested).
+
+### P12: CLI (`nhl --help`)
+- Commands: capture-schedule/data/rosters/goalies/odds, replay, fit-params, price-slate, forward-cycle, capture-close, ingest-results, grade, clv, verify, evaluate-gates, export-desk, backtest, leakage-audit, forward-drill.
+- Unsafe modes need explicit flags: `--synthetic`, `--simulated-clock --at`, `--overwrite`. Non-causal forward pricing is refused.
+
+### P13: Tests
+**128 passed** (Part A end: 89; all 89 still pass). No existing assertion was weakened. Two mechanical updates:
+- the artifact test helper uses the v2 field names;
+- the raw-SQL tamper test updates `probability_edge` instead of the removed `edge` column, so it still exercises the trigger rather than failing on a missing column.
+
+| File | Tests | Covers (mandate numbering) |
 |---|---|---|
-| **3A MoneyPuck vintage** | The files carry no model version, so vintage cannot be established from the data. Backfilled MoneyPuck xG is therefore `VINTAGE_UNVERIFIED` (non-causal) unless captured within 36 h or attested (`moneypuck_vintages.json`, currently empty). **Causal replacement:** walk-forward in-house xG from NHL play-by-play, fit only on prior seasons; scoring an in-sample season raises | `test_moneypuck_vintage_rules`, `test_vintage_backfill_is_non_causal_and_hidden_from_strict_views`, `test_xg_fits_only_prior_seasons…` |
-| **3B League constants** | Rolling window of seasons completed before S, strict view at Sep 1 of S. Per-constant FIT/DEFAULT provenance and sample sizes. Persisted write-once as `league_constants/season=S/LC_<hash>.json`. `constants_id` is stamped into every artifact's `config_hash`. The pipeline refuses constants from another season | `test_constants_use_only_prior_completed_seasons` (mutating season-S data leaves S constants unchanged; mutating S-1 changes them), write-once/tamper tests, wrong-season refusal |
-| **3C Rosters** | Dated `RosterSlot` snapshots; priors use the latest one at `as_of`; undated rosters are blocked for real data; roster endpoint is live-capture only | `test_roster_as_of_uses_latest_known_snapshot`, `test_roster_parser_live_vs_backfill` |
-| **3D Postponements** | Schedule versions (dedupe by content); latest version known at `as_of`; PPD/SUSP/CNCL not priced; slates built from all versions | `test_schedule_versions_latest_known_wins`, `test_postponed_game_skipped_then_priced_on_new_date` |
+| test_market_contract.py | 15 | 1–11: contract, malformed rejection, keys, American/decimal, 2-way/3-way no-vig, incomplete, close selection, actual cutoff, scheduled fallback, stale/suspended close, close store |
+| test_chain_and_lineage.py | 16 | 12–14, 16–17, 24–26, 30: edge vs EV, vig, stale/blocked cannot promote, goalie transitions/determinism/conflicts/staleness/scratch, lanes, overrides, config fingerprint |
+| test_forward_lifecycle.py | 3 | 15, 18–23, 27–28: later confirmation immutability, idempotence, meaningful reprice, no duplicates, chain across reprices, grading, CLV, deterministic exports, post-drop refusal, old artifact unaffected by later roster/market changes |
+| test_real_format_lifecycle.py | 1 | Definition of done on real-format fixtures via replay |
+| test_cli_safety.py | 4 | Unsafe flags, overwrite refusal, leakage-audit CLI |
+| test_backtest.py (existing) | 5 | 29: full vs truncated leakage equivalence; synthetic blocked; postponement; unattested real-origin blocked |
+| earlier suites | 84 | Part A and Phase 1 |
 
-Synthetic 2025 constants (`LC:67c7cb02a1bcdc94`, trained on 2024): rate_5v5 2.613 (FIT), penalty_rate 3.033 (FIT), rate_3v3 7.051 (FIT, 285 tied games), shootout_home_prob 0.493 (FIT, 88 shootouts), rate_pp **DEFAULT** (210 PP-hours < the 300-hour minimum). Eight simulator constants are still **static defaults** because they need event-level fits (pull timing, empty-net, 6v5, SH, 4v4, score effects).
+### P14: No model tuning. Model changes and their justification
+Three **clock-dependence defects** were found by the forward-lifecycle tests. They were fixed as implementation errors (incorrect causal/timing behaviour), not for performance:
 
-## Integrity finding during Phase 2
-The full-season rerun failed `verify_chain` at row 12,023. Cause: `ev_per_unit` rounded to `-0.0`, and SQLite stores it as `0.0`, so the recomputed hash differed. This was a latent Phase 1 bug. Nothing was edited; the chain check did its job. Fix: canonical hashing normalises signed zero, which leaves the hash unchanged for every other row, and `append` now rejects NaN/inf. The affected generated database was left untouched, and the run was regenerated and verified. Regression test: `test_negative_zero_and_nan_round_trip_safety`.
+| # | Defect | Evidence | Fix | Tests |
+|---|---|---|---|---|
+| 1 | Monte Carlo seed derived from `as_of` | A clock-only rerun re-appended all 65 artifacts | Seed derived from parameter fingerprint + constants id | `test_forward_lifecycle` |
+| 2 | Rating time-decay anchored to `as_of` | Parameters drifted hourly with no new data | Decay anchored to the newest visible data time | same |
+| 3 | One RNG stream per slate | A goalie confirmation in one game repriced 4 other games | Per-game streams with common random numbers across goalie pairs | same |
 
-## Tests
-`python3 -m pytest -q` → **89 passed** (Phase 1: 37). New suites: `test_provenance`, `test_nhl_api_validation`, `test_moneypuck_validation`, `test_market_provenance`, `test_xg`, `test_league_constants`, `test_rosters`, `test_ingest_replay`, plus new backtest integration tests (postponement; real-origin data without provenance is fully BLOCKED).
+**Before → after on the synthetic 2025-26 walk-forward** (1,188 games; changes are Monte Carlo/decay-anchor noise, and no metric was targeted):
 
-## Synthetic walk-forward rerun (mechanics only, SYNTHETIC)
-1,188 games, 15,444 artifacts, **hash chain verified**, 0 missing closes, 0 provenance-blocked artifacts. ML log loss 0.6893 vs close 0.6871; ECE: ML 0.017, total 0.009; calibration slope: ML 0.92, puck line 0.95. All gates fail: `NOT_ELIGIBLE:SYNTHETIC_DATA`, and most also fail on log loss versus the close. Samples are in `docs/samples/`.
+| Market | log loss (close) | log loss model before → after | ECE before → after | slope before → after |
+|---|---|---|---|---|
+| ML | 0.6871 | 0.6893 → 0.6884 | 0.017 → 0.021 | 0.92 → 1.04 |
+| Puck line | 0.6068 | 0.6065 → 0.6075 | 0.010 → 0.027 | 0.95 → 0.95 |
+| Total | 0.6893 | 0.6925 → 0.6933 | 0.009 → 0.013 | 0.33 → 0.23 |
+| Team total | 0.6663 | 0.6680 → 0.6682 | 0.009 → 0.011 | 0.76 → 0.73 |
 
-## Remaining blockers before real forward testing
-1. **Network access** to `api-web.nhle.com`, `api.nhle.com` and `moneypuck.com`. Then run `nhl capture` / `nhl replay` on live payloads and confirm the VERIFY fields: `situationCode` digit order, penalty `eventOwnerTeamId` = penalized team, the MoneyPuck `penaltiesFor` meaning, rink-side x-coordinate convention for xG, and boxscore goalie fields.
-2. **Timestamped odds history including closes** (paid vendor) in the canonical CSV.
-3. **Timestamped goalie reports** (a source with publication times, or live pregame captures from opening night).
-4. **Historical rosters:** transaction-level data for any pre-2026 strict backtest. Forward tracking can start from live roster captures.
-5. **Event-level fits** for the eight default simulator constants (from play-by-play, walk-forward), and a real-data check of the in-house xG before it feeds ratings.
-6. **A scheduler** for daily `capture` + forward runs at OPEN/9AM/NOON/3PM/T-60, close capture, grading and chain verification.
-7. **The rest of the Phase 2 mandate** after "Persist…", which was not received.
+**Historical metrics changed only within noise, and no gate outcome changed:** every gate failed before and fails after.
+
+The synthetic numbers carry no real-data meaning. The market in that data is built near the truth.
+
+### Default constants
+Status is persisted in `LeagueConstants.sources`, hashed into `constants_id` → `config_hash`, and listed per artifact in `default_constants`.
+- **Structural defaults**, not estimable from ingested data (need event-level fits on prior seasons): `rate_sh`, `rate_6v5_attack`, `rate_empty_net`, `rate_4v4_mult`, `score_effect_beta`, `score_effect_beta_p3`, `pull_trailing_by_1_seconds`, `pull_trailing_by_2_seconds`.
+- **Exposure default** in the synthetic sample: `rate_pp` (210 PP-hours < the 300-hour minimum from one prior season).
+- Fitted: `rate_5v5`, `penalty_rate`, `rate_3v3`, `shootout_home_prob`.
+
+## Final verification (at the code commit that generated the samples, `244132f`)
+| Check | Result |
+|---|---|
+| Complete suite | 128 passed |
+| Artifact hash chains | Backtest 15,444 rows verified; closes chain verified; drill predictions + closes verified |
+| Deterministic replay | `test_capture_then_replay_is_deterministic_and_provenanced` |
+| Deterministic desk exports | Drill export ×2 byte-identical; `test_forward_lifecycle`, `test_real_format_fixture_lifecycle` |
+| Leakage equivalence | Backtest audit 2025-11-12 and 2026-02-03: EQUIVALENT; test suite |
+| Old artifact unaffected by later roster/goalie/market changes | `test_old_artifact_unaffected_by_later_roster_and_market_changes`, `test_forward_lifecycle` |
+| Synthetic cannot promote | All 15,444 backtest rows DEV_SYNTHETIC / BLOCKED; gates `NOT_ELIGIBLE:SYNTHETIC_DATA` |
+| Non-causal cannot qualify as strict | `test_evidence_lanes`, `test_strict_view_hides_non_causal…`, gates `NOT_ELIGIBLE:NON_CAUSAL_OR_UNATTESTED_INPUTS` |
+| Samples ↔ final fingerprints | `docs/samples/README.md` records the code commit and `all_config_hash()` including both registries |
+
+## Blockers (ordered)
+1. **Network:** `api-web.nhle.com`, `api.nhle.com` and `moneypuck.com` are unreachable (403). No live payload has been parsed, and the VERIFY fields remain unconfirmed.
+2. **Odds provider:** no timestamped live/historical odds source with closing coverage. CLV and the close benchmark are fixture/synthetic only.
+3. **Goalie-report provider** with publication timestamps.
+4. **Actual puck-drop source:** every close uses the labelled scheduled fallback.
+5. **Event-level fits** for the 8 structural default constants (prior seasons only). Real-data check of the in-house xG.
+6. **Historical transaction-level rosters** for strict pre-2026 backtests. Forward tracking can start from live roster captures.
+7. **Operational scheduler** (cron) for the protocol in forward_testing_protocol.md.
+8. Props (SOG/saves) are unpriced (Phase 1D), and lineup ingestion is absent (`lineup_state=UNKNOWN`).
+
+## Commits (Part B)
+```
+7dc7e1f Priority 4: market-data contract, explicit no-vig, closing-line rule
+833ac97 Priorities 5, 6, 8-10: explicit pricing chain, goalie lineage, evidence lanes, market-by-market gates
+599633b Priorities 7 and 11: forward runner, reprice dedupe, desk reports; fix clock-driven reprices
+d02e8a4 Priority 12-13: safe operational CLI, leakage-audit module, real-format lifecycle drill
+244132f forward-drill: exercise a late goalie scratch on a team that has a confirmed report
+(+ this documentation/samples commit; final HEAD reported in the hand-off message)
+```

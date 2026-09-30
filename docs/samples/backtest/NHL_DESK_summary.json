@@ -29,6 +29,12 @@
     "hard_fail": false,
     "score": 0.9674
   },
+  "eligibility": {
+    "INELIGIBLE_DEV": 65
+  },
+  "evidence_lanes": {
+    "DEV_SYNTHETIC": 65
+  },
   "feature_version": "nhl-feat-0.1.0",
   "games": 5,
   "goalies": {
@@ -41,12 +47,12 @@
   },
   "markets": 65,
   "model_version": "nhl-gs-0.1.0",
-  "note": "Phase 1: no ACTIONABLE lane. Shadow lanes are informational only.",
+  "note": "No ACTIONABLE lane until gates pass. Shadow lanes are informational only.",
   "pipeline": "READY",
   "shadow_lanes": {
-    "MODEL_PLUS": 8,
+    "MODEL_PLUS": 6,
     "PASS": 45,
-    "WATCH": 12
+    "WATCH": 14
   },
   "slate": "2026-01-20"
 }
