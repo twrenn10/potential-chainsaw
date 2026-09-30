@@ -1,25 +1,25 @@
-# Leakage audit (Phase 1)
+# Leakage audit (updated in Phase 2)
 
-Principle: every record carries `available_at` = the earliest instant it was actually knowable. Model and feature code reads history only through `nhl.data.pit.PointInTimeView`, which returns records with `available_at <= as_of`. Evaluation data (results, closing lines) is read only by `nhl.backtest.evaluate`, after predictions are stored.
+Principle: every record carries `available_at` and, in Phase 2, a `Provenance` stating the rule that produced it (see [temporal_provenance.md](temporal_provenance.md)). Model and feature code reads history only through a **strict** `nhl.data.pit.PointInTimeView`. Evaluation data is read only by `nhl.backtest.evaluate`, after predictions are stored.
 
-**Enforcement test:** `tests/test_backtest.py::test_future_data_cannot_change_predictions` runs a slate twice. The first run uses the full store. The second uses a store physically truncated to what was knowable at `as_of`. The two sets of artifacts must be identical. Any future-data path fails this test.
+**Enforcement test:** `tests/test_backtest.py::test_future_data_cannot_change_predictions`. Artifacts built from the full store are byte-identical to those built from a store physically truncated at `as_of`. Since Phase 2 this also covers league constants and roster snapshots.
 
 | # | Channel | Rule | Status |
 |---|---|---|---|
-| 1 | Game results | `available_at = puck drop + 4h`. That is later than any real finish, so the bound can hide data but never leak it. | Enforced |
-| 2 | MoneyPuck game-by-game rows | Visible the next day at 12:00 UTC. Same-night data is never assumed available. | Enforced |
-| 3 | MoneyPuck season summaries | Visible July 1 after the season. They feed the next season's priors only. | Enforced + tested |
-| 4 | Player priors | Only seasons with lag ≥ 1 are used, via the view. | Enforced + tested |
-| 5 | Goalie priors | Only goalie games from seasons strictly before the target season. | Enforced |
-| 6 | In-season ratings | Refit from scratch every slate from the view. Exponential decay only reweights visible rows. | Enforced |
-| 7 | Goalie starters | A report counts only once its `available_at` has passed. Otherwise the starter comes from the workload model on visible history. Games are priced as a mixture, and a starter is never assumed confirmed. | Enforced + tested |
-| 8 | Odds | Only snapshots with `snapshot_ts <= as_of` are used. The close is used only in evaluation. | Enforced + tested |
-| 9 | Schedule / rest / travel | Known in advance. For historical backfill, `parse_schedule(..., historical_available_at=...)` must be set explicitly. | Enforced; postponements are a residual |
-| 10 | Prediction timing | `as_of < puck_drop` for every artifact. FORWARD rows also require the wall-clock write time to be before puck drop. | Enforced (DB layer) + tested |
-| 11 | Artifact rewrite | Append-only triggers, a hash chain, and refusal to rewrite an existing `prediction_id`. | Enforced + tested |
-| 12 | Validation gates | Predetermined in `validation_gates.json` and versioned by `gate_version`. | Process |
-| **R1** | **MoneyPuck xG model** | MoneyPuck's xG is trained on multi-season data that may postdate a backtest date. | **Open (residual).** Fit our own walk-forward xG before any ACTIONABLE promotion. |
-| **R2** | **Simulator league constants** | Pull timing, empty-net, 3v3, PP and score-effect rates are general-league defaults. Refitting them on the full history and then backtesting on the same seasons would leak. | **Open.** Refit only on seasons before each test window. |
-| **R3** | **Rosters for priors** | `RosterSlot` has no `available_at` yet. Mid-season trades and injuries would be invisible, or leak if taken from an end-of-season roster. | **Open.** Add timestamped roster snapshots from the NHL API roster endpoint. |
-| **R4** | **Postponed games** | A historical schedule backfill shows the final dates, not the originally announced ones. | Accept, and document per season. |
-| R5 | Synthetic data | Results come from the same simulator family as the model, so the data is circular. | By design. Synthetic data is always BLOCKED and gates are ineligible. |
+| 1 | Game results | `EVENT_FACT`: `min(fetched_at, puck drop + 4h)`. Produced only from complete, score-cross-checked event streams | Enforced + tested |
+| 2 | MoneyPuck game rows | Next day 12:00 UTC **and** vintage rule (see 3A) | Enforced + tested |
+| 3 | MoneyPuck season summaries | July 1 after the season **and** vintage rule | Enforced |
+| 4 | Player priors | Seasons with lag ≥ 1 only, via strict view | Enforced + tested |
+| 5 | Goalie priors | Seasons strictly before the target season | Enforced |
+| 6 | In-season ratings | Refit every slate from the strict view | Enforced |
+| 7 | Goalie starters | Reports need a pregame `published_at` or a live pregame capture; otherwise non-causal. Priced as a mixture | Enforced + tested |
+| 8 | Odds | `SOURCE_PUBLISHED` at `snapshot_ts`. Rows observed after fetch, or with conflicting prices at one instant, are rejected. The close is used only in evaluation | Enforced + tested |
+| 9 | Schedule | Live capture = `fetched_at`. Backfill only through a documented override, else non-causal. Versions are kept | Enforced + tested |
+| 10 | Prediction timing | `as_of < puck_drop`. FORWARD rows also need wall-clock write time before puck drop | Enforced + tested |
+| 11 | Artifact rewrite | Append-only triggers, a hash chain, and refusal to rewrite. Phase 2: signed-zero normalisation, non-finite values rejected | Enforced + tested |
+| 12 | Validation gates | Predetermined, `gate_version` | Process |
+| **3A** | **MoneyPuck xG vintage** (was R1) | Backfilled third-party xG is `VINTAGE_UNVERIFIED` (non-causal, invisible to strict views) unless captured contemporaneously or attested. Causal replacement: in-house walk-forward xG (`nhl/features/xg.py`), fit only on prior seasons | **Closed in code.** The attestation registry is empty; the in-house xG is untested on real payloads |
+| **3B** | **League constants** (was R2) | `fit_league_constants`: seasons completed before S, strict view at Sep 1 of S, rolling window, per-constant FIT/DEFAULT provenance, persisted write-once with content id stamped into artifacts. The pipeline refuses constants from another season | **Closed** for rate_5v5, rate_pp, penalty_rate, rate_3v3, shootout_home_prob. Pull timing, empty-net, 6v5, SH, 4v4 and score-effect constants remain labelled static defaults (not fit from any season, so no leakage, but unvalidated) |
+| **3C** | **Rosters** (was R3) | `RosterSlot.available_at` + provenance. Priors use the latest snapshot at `as_of`. Undated rosters are hard-blocked for real data. The roster endpoint is live-capture only | **Closed in code.** Historical rosters cannot be reconstructed from the endpoint; a transaction-level source is needed for pre-2026 backtests |
+| **3D** | **Postponements** (was R4) | Schedule versions; views return the version known at `as_of`; PPD/SUSP/CNCL are not priced; slates are built from every version | **Closed** for live-captured schedules. Remains a residual inside seasons whose schedule is backfilled through an override |
+| R5 | Synthetic data | Circular by design | Always BLOCKED; gates ineligible |

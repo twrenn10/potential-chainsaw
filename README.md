@@ -8,10 +8,12 @@ This is a point-in-time NHL pricing engine with promotion lanes gated by governa
 
 ```bash
 pip install -e ".[dev]"
-python3 -m pytest -q                         # 37 tests
+python3 -m pytest -q                         # 89 tests
 python3 -m nhl.cli demo --out out/demo        # synthetic end-to-end walk-forward (~3.5 min)
 python3 -m nhl.cli verify --db out/demo/predictions.sqlite
 python3 -m nhl.cli fetch-schedule --date 2026-10-07   # live NHL API (needs network access)
+python3 -m nhl.cli capture --date 2026-10-07 --store store/ --rosters TOR,MTL --season 2026
+python3 -m nhl.cli replay --store store/ --out out/ingest   # provenanced store + ingest report
 ```
 
 ## Layout
@@ -19,8 +21,8 @@ python3 -m nhl.cli fetch-schedule --date 2026-10-07   # live NHL API (needs netw
 | Path | Role |
 |---|---|
 | `nhl/contracts/` | Canonical ids (games, teams, players, markets), enums, validated record schemas with `available_at` |
-| `nhl/data/` | Raw immutable snapshots, NHL API / MoneyPuck / odds / goalie-report ingestion, `PointInTimeView`, quality gates |
-| `nhl/features/` | Player-based priors, joint MAP ratings, rest/travel, rink SOG factors |
+| `nhl/data/` | Raw immutable snapshots, checked parsers (NHL API / MoneyPuck / odds / goalie reports / rosters), provenance rules, strict `PointInTimeView`, capture + replay, quality gates |
+| `nhl/features/` | Player-based priors, joint MAP ratings, walk-forward league constants, walk-forward xG, rest/travel, rink SOG factors |
 | `nhl/models/` | `goalie_start.py` starter mixture, `game_state.py` simulator |
 | `nhl/pricing/` | Slate pricing engine, market probabilities (ML, 3-way, puck line, totals, team totals) |
 | `nhl/market/` | American/decimal conversion, de-vig, quotes at `as_of`, open/close/movement marks |
@@ -31,6 +33,8 @@ python3 -m nhl.cli fetch-schedule --date 2026-10-07   # live NHL API (needs netw
 | `nhl/config/*.json` | Simulator baselines, goalie-start priors, governance, validation gates (hashed into every artifact) |
 
 ## Docs
+- [Phase 2 report](docs/PHASE2_REPORT.md): real-data ingestion hardening, temporal provenance, leakage gaps 3A–3D
+- [Temporal provenance rules](docs/temporal_provenance.md)
 - [Phase 1 report](docs/PHASE1_REPORT.md): architecture map, MLB reuse, NHL-specific design, test results, pricing sample, blockers
 - [Leakage audit](docs/leakage_audit.md)
 - [Data-source inventory](docs/data_sources.md)

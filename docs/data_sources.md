@@ -6,6 +6,8 @@
 | NHL API `.../gamecenter/{id}/play-by-play` | Events, `situationCode` strength, goals by period type (REG/OT/SO) | Public, undocumented | Event; result `available_at` = start + 4h | Client + parser (events, results incl. shootout) |
 | NHL API `.../gamecenter/{id}/boxscore` | Goalie `starter` flag, TOI, shots/saves | Public, undocumented | Game | Client + parser; wins over MoneyPuck for `started` |
 | NHL stats API `api.nhle.com/stats/rest/en/shiftcharts` | Shifts, for line/TOI context | Public, undocumented | Shift | Client + parser (not yet used in features) |
+| NHL API `.../roster/{TEAM}/{SEASON}` | Roster snapshot for priors | Public, undocumented | Capture time (live only) | Client + checked parser (Phase 2) |
+| In-house xG (`nhl/features/xg.py`) | Walk-forward xG from play-by-play | Derived | puck drop + 4h; model trained on prior seasons | Implemented; causal replacement for backfilled MoneyPuck xG |
 | MoneyPuck team game-by-game CSV | 5on5 / 5on4 / all: xG, goals, SOG, penalties, TOI | Free download (check terms) | Team-game-situation; next day 12:00 UTC | Parser + schema check; **verify `penaltiesFor` semantics** |
 | MoneyPuck goalie game-by-game CSV | xGA, GA, shots on goal, TOI | Free download | Goalie-game; next day | Parser (starter inferred by TOI, flagged) |
 | MoneyPuck skater season CSV | 5v5 on-ice xGF/xGA for player priors | Free download | Player-season; July 1 after season | Parser |
@@ -13,5 +15,10 @@
 | Goalie confirmations (DailyFaceoff, beat reporters, or vendor) | Starter state with report time | Scrape or paid; **check ToS** | Report timestamp | Canonical CSV schema and parser |
 | Line combinations / lineups | Lineup state | TBD | Timestamp | Not implemented (`lineup_state=UNKNOWN`) |
 
+## Validation status (Phase 2)
+All parsers have `*_checked` variants that return records, per-record rejections and warnings. Strict wrappers raise if anything was rejected. Validation covers ids and season consistency, explicit-UTC start times, schedule/game state, teams, period/clock rules, `situationCode` sanity, event owners, penalty durations, score reconstruction versus reported score, SOG cross-checks (as warnings), starter uniqueness, saves/shots/GA consistency, strict integers (no `2.7 -> 2` coercion), finite non-negative floats, duplicate and tied rows (treated as ambiguous and dropped), and the timestamp sanity of odds and goalie reports.
+
+**These checks have only been exercised against source-format fixtures. No live payload has been validated. The field names flagged VERIFY must be confirmed against live data.**
+
 ## Network note
-This build environment's network policy denies `api-web.nhle.com`, `api.nhle.com`, `moneypuck.com` and `peter-tanner.com`. Ingestion is therefore tested against recorded-format fixtures in `tests/fixtures/`, and the end-to-end run uses the synthetic league. To run live ingestion, allow these hosts in the environment's network settings, or run the code on a machine with open access.
+As of 2026-09-30 this build environment's network policy still denies `api-web.nhle.com`, `api.nhle.com`, `moneypuck.com` and `peter-tanner.com` (`nhl capture` gets `403 Forbidden` from the egress proxy). Ingestion is therefore tested against recorded-format fixtures in `tests/fixtures/`, and the end-to-end run uses the synthetic league. To run live ingestion, allow these hosts in the environment's network settings, or run the code on a machine with open access.
