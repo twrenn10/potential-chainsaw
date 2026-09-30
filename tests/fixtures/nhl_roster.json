@@ -1,0 +1,4 @@
+{"forwards":[{"id":8479318,"firstName":{"default":"Auston"},"lastName":{"default":"Matthews"},"positionCode":"C","sweaterNumber":34},
+             {"id":8478483,"firstName":{"default":"Mitch"},"lastName":{"default":"Marner"},"positionCode":"R","sweaterNumber":16}],
+ "defensemen":[{"id":8476853,"firstName":{"default":"Morgan"},"lastName":{"default":"Rielly"},"positionCode":"D","sweaterNumber":44}],
+ "goalies":[{"id":8479361,"firstName":{"default":"Joseph"},"lastName":{"default":"Woll"},"positionCode":"G","sweaterNumber":60}]}

@@ -253,3 +253,31 @@ class PlayerSeason:
         object.__setattr__(self, "available_at", parse_ts(self.available_at))
         if self.position not in {"F", "D", "G"}:
             raise ValueError(f"bad position {self.position}")
+
+
+@dataclass(frozen=True)
+class RosterSlot:
+    """One player on one team's roster snapshot.
+
+    ``available_at`` = when this roster state was knowable (snapshot capture or
+    source publication). Slots without it are UNATTESTED and are hard-blocked for
+    non-synthetic data. A team's roster at ``as_of`` is its latest snapshot with
+    ``available_at <= as_of`` (see ``nhl.features.priors.roster_as_of``).
+    """
+
+    team: str
+    player_id: str
+    position: str  # F | D | G
+    proj_5v5_min: float  # projected 5v5 minutes per game
+    available_at: datetime | None = None
+    provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "team", canonical_team(self.team))
+        object.__setattr__(self, "player_id", canonical_player_id(self.player_id))
+        if self.position not in {"F", "D", "G"}:
+            raise ValueError(f"bad position {self.position}")
+        if not (0.0 <= self.proj_5v5_min <= 40.0):
+            raise ValueError(f"implausible projected minutes {self.proj_5v5_min}")
+        if self.available_at is not None:
+            object.__setattr__(self, "available_at", parse_ts(self.available_at))

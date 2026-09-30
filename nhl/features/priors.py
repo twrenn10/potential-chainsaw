@@ -23,19 +23,39 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime
 
-from nhl.contracts import PlayerSeason
+from nhl.contracts import PlayerSeason, RosterSlot
 from nhl.data.pit import PointInTimeView, assert_visible
 
 SEASON_WEIGHTS = (3.0, 2.0, 1.0)
 
 
-@dataclass(frozen=True)
-class RosterSlot:
-    team: str
-    player_id: str
-    position: str  # F | D | G
-    proj_5v5_min: float  # projected 5v5 minutes per game
+def roster_as_of(roster: list[RosterSlot], as_of: datetime, strict: bool = True) -> tuple[list[RosterSlot], bool]:
+    """Latest roster snapshot per team knowable at ``as_of``.
+
+    Returns (slots, unattested_used). Slots with ``available_at`` after ``as_of`` are
+    never used; non-causal slots are dropped in strict mode. Slots without a
+    timestamp form a legacy "undated" snapshot used only when no dated one exists.
+    """
+
+    by_team: dict[str, dict] = defaultdict(lambda: defaultdict(list))
+    for s in roster:
+        if s.available_at is not None and s.available_at > as_of:
+            continue
+        if strict and s.provenance is not None and not s.provenance.causal:
+            continue
+        by_team[s.team][s.available_at].append(s)
+    out: list[RosterSlot] = []
+    unattested = False
+    for team in sorted(by_team):
+        snaps = by_team[team]
+        dated = [t for t in snaps if t is not None]
+        key = max(dated) if dated else None
+        if key is None:
+            unattested = True
+        out.extend(sorted(snaps[key], key=lambda s: s.player_id))
+    return out, unattested
 
 
 @dataclass(frozen=True)

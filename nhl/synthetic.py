@@ -29,7 +29,7 @@ from nhl.contracts import (
     TeamGameStats,
 )
 from nhl.data.pit import HistoricalStore
-from nhl.features.priors import RosterSlot
+from nhl.contracts import RosterSlot
 from nhl.market.novig import prob_to_american
 from nhl.models.game_state import GameRates, TeamRates, simulate
 from nhl.pricing.markets import GamePricing
@@ -114,7 +114,8 @@ def generate(
             att[t] = math.log(1 + np.mean([p["f"] for p in mine]) / LG_XG60 * 1.5) + rng.normal(0, 0.03)
             dfn[t] = math.log(1 + np.mean([p["a"] for p in mine]) / LG_XG60 * 1.5) + rng.normal(0, 0.03)
             for p in mine:
-                roster.append(RosterSlot(t, p["id"], p["pos"], 14.0 if p["pos"] == "F" else 19.0))
+                roster.append(RosterSlot(t, p["id"], p["pos"], 14.0 if p["pos"] == "F" else 19.0,
+                                         available_at=datetime(season, 9, 15, tzinfo=timezone.utc)))
         rosters[season] = roster
         pp = {t: rng.normal(0, 0.10) for t in TEAM_LIST}
         pk = {t: rng.normal(0, 0.10) for t in TEAM_LIST}

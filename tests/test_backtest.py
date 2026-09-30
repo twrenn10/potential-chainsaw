@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 
 from nhl.backtest.evaluate import evaluate
-from nhl.backtest.walk_forward import BacktestConfig, run_walk_forward, slate_days
+from nhl.backtest.walk_forward import ET, BacktestConfig, run_walk_forward, slate_days
 from nhl.contracts import PredictionMode
 from nhl.data.pit import HistoricalStore
 from nhl.desk.board import export_desk
@@ -68,3 +68,36 @@ def test_desk_export_is_deterministic(league, tmp_path):
     assert outs[0] == outs[1]
     text = outs[0]["text"].decode()
     assert "NHL DESK - 2026-01-20" in text and "ACTIONABLE" not in text
+
+
+def test_postponed_game_skipped_then_priced_on_new_date(league, tmp_path):
+    from nhl.contracts import Game
+
+    store = league.store
+    days = slate_days([g for g in store.games if g.season == 2025])
+    day = date(2025, 11, 12)
+    target = sorted(days[day], key=lambda g: g.game_id)[0]
+    new_start = target.start_time + timedelta(days=7)
+    ppd = replace(target, status="PPD", available_at=target.start_time - timedelta(hours=6))
+    moved = replace(target, status="SCHEDULED", start_time=new_start, available_at=target.start_time + timedelta(days=1))
+    s2 = HistoricalStore(games=store.games + [ppd, moved], results=[r for r in store.results if r.game_id != target.game_id],
+                         team_stats=store.team_stats, goalie_stats=store.goalie_stats, goalie_reports=store.goalie_reports,
+                         odds=[o for o in store.odds if o.game_id != target.game_id], player_seasons=store.player_seasons,
+                         data_origin=store.data_origin)
+    end = new_start.astimezone(ET).date()
+    preds = PredictionStore(tmp_path / "ppd.sqlite")
+    s = run_walk_forward(s2, league.rosters, BacktestConfig(2025, day, end, n_sims=300), preds)
+    assert f"{day}:{target.game_id}:STATUS_PPD" in s["skipped_status"]
+    assert s["constants_train_seasons"] == [2024]
+
+
+def test_unattested_real_origin_is_blocked(league):
+    store = league.store
+    real_shaped = HistoricalStore(games=store.games, results=store.results, team_stats=store.team_stats,
+                                  goalie_stats=store.goalie_stats, goalie_reports=store.goalie_reports, odds=store.odds,
+                                  player_seasons=store.player_seasons, data_origin="HISTORICAL")
+    games = slate_days([g for g in store.games if g.season == 2025])[date(2026, 1, 20)]
+    as_of = min(g.start_time for g in games) - timedelta(minutes=60)
+    run = run_slate(real_shaped, league.rosters, 2025, games, as_of, PredictionMode.BACKTEST, n_sims=300)
+    assert run.artifacts and all(a.status == "BLOCKED" and "UNATTESTED_PROVENANCE" in a.reason_codes for a in run.artifacts)
+    assert all("SYNTHETIC_SOURCE" not in a.reason_codes for a in run.artifacts)

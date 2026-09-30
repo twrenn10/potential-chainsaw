@@ -18,7 +18,7 @@ from nhl.data.quality import HealthReport, evaluate_slate
 from nhl.desk.candidates import build_artifacts
 from nhl.contracts.schemas import PRICEABLE_STATUSES
 from nhl.features.league_constants import LeagueConstants, fit_league_constants
-from nhl.features.priors import RosterSlot, goalie_priors, team_priors
+from nhl.features.priors import RosterSlot, goalie_priors, roster_as_of, team_priors
 from nhl.features.ratings import Ratings, fit_ratings, league_baselines
 from nhl.ledger.predictions import PredictionArtifact
 from nhl.pricing.engine import PricedGame, game_seed, price_slate
@@ -73,12 +73,14 @@ def run_slate(
         raise LeakageError(f"constants fit for {constants.target_season} used for season {season}")
     sim_cfg = constants.apply(load("simulator"))
     league = league_baselines(sim_cfg)
-    tp = team_priors(view, rosters.get(season, []), season, league["rate_5v5"])
+    roster, roster_unattested = roster_as_of(rosters.get(season, []), as_of, strict=view.strict)
+    extra_blocks = ["UNATTESTED_ROSTER"] if roster_unattested and view.data_origin != "SYNTHETIC" else []
+    tp = team_priors(view, roster, season, league["rate_5v5"])
     ratings = fit_ratings(view, season, tp, goalie_priors(view, season), league)
     health = evaluate_slate(view, [g.game_id for g in slate], teams_with_prior=set(tp))
     priced, errors = price_slate(view, slate, ratings, n_sims=n_sims, seed=game_seed(seed, as_of.isoformat()), sim_cfg=sim_cfg)
     artifacts = build_artifacts(
         view, priced, view.odds_snapshots({g.game_id for g in slate}), health, mode, created_at=created_at or utcnow(),
-        constants_id=constants.constants_id,
+        constants_id=constants.constants_id, extra_provenance_blocks=extra_blocks,
     )
     return SlateRun(view, ratings, health, priced, errors, artifacts, constants, skipped)

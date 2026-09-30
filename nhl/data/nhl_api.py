@@ -27,7 +27,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from nhl.contracts import Game, GameResult, GoalieGameStats, canonical_team
+from nhl.contracts import Game, GameResult, GoalieGameStats, RosterSlot, canonical_team
 from nhl.contracts.ids import canonical_game_id, canonical_player_id, game_type_of
 from nhl.timeutil import utcnow
 
@@ -445,3 +445,47 @@ def parse_shifts_checked(payload: dict[str, Any]) -> ParseResult[dict[str, Any]]
 
 def parse_shifts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return parse_shifts_checked(payload).require_clean()
+
+
+ROSTER_GROUPS = {"forwards": ("F", {"C", "L", "R"}), "defensemen": ("D", {"D"}), "goalies": ("G", {"G"})}
+DEFAULT_PROJ_5V5_MIN = {"F": 13.5, "D": 18.5, "G": 0.0}  # placeholder until a deployment source exists
+
+
+def parse_roster_checked(
+    payload: dict[str, Any],
+    team: str,
+    season: int,
+    entry: SnapshotEntry,
+    mode: prov.CaptureMode = prov.CaptureMode.LIVE,
+) -> ParseResult[RosterSlot]:
+    """``/v1/roster/{TEAM}/{season}``: the roster as the endpoint shows it at fetch time.
+
+    Only a LIVE capture proves that roster state existed then. A capture made after the
+    season ended is forced to BACKFILL, and a backfilled roster has no historical
+    timestamp, so it is NON-CAUSAL (the endpoint returns an end-of-season view).
+    Projected minutes are position defaults (flagged in docs) until deployment data exists.
+    """
+
+    out: ParseResult[RosterSlot] = ParseResult()
+    t = canonical_team(team)
+    season_end = datetime(season + 1, 7, 1, tzinfo=entry.fetched_at.tzinfo)
+    reference = min(entry.fetched_at, season_end)
+    p = prov.published_report(SOURCE, entry.snapshot_id, entry.fetched_at, reference, None, mode, SOURCE_VERSION)
+    seen: set[str] = set()
+    for group, (pos, codes) in ROSTER_GROUPS.items():
+        for pl in payload.get(group, []) or []:
+            key = f"{t}:{pl.get('id', '?')}"
+            try:
+                pid = canonical_player_id(req(pl, "id"))
+                code = req(pl, "positionCode")
+                if code not in codes:
+                    raise FieldError(f"positionCode {code!r} not valid for {group}")
+                if pid in seen:
+                    raise FieldError("player listed twice")
+                seen.add(pid)
+                out.records.append(RosterSlot(t, pid, pos, DEFAULT_PROJ_5V5_MIN[pos], available_at=p.available_at, provenance=p))
+            except (FieldError, ValueError) as exc:
+                out.reject("roster", key, str(exc))
+    if not out.records:
+        out.reject("roster", t, "empty roster payload")
+    return out

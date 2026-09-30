@@ -23,7 +23,7 @@ from nhl.config import load
 from nhl.contracts import Game, PredictionMode
 from nhl.data.pit import HistoricalStore
 from nhl.features.league_constants import LeagueConstantsStore, fit_league_constants
-from nhl.features.priors import RosterSlot
+from nhl.contracts import RosterSlot
 from nhl.ledger.predictions import PredictionStore
 from nhl.pipeline import run_slate
 
