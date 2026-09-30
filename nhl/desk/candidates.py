@@ -31,7 +31,7 @@ def data_snapshot_id(view: PointInTimeView, odds_used: list[OddsSnapshot]) -> st
     """Fingerprint of everything visible to this prediction run."""
 
     parts = [
-        fmt_ts(view.as_of), view.data_origin,
+        fmt_ts(view.as_of), view.data_origin, f"strict={view.strict}",
         str(len(view.games())), str(len(view.results())), str(len(view.team_stats())),
         str(len(view.goalie_stats())), str(len(view.player_seasons())),
         *sorted({s.snapshot_id for s in odds_used}),
@@ -53,13 +53,18 @@ def build_artifacts(
     mode: PredictionMode,
     created_at: datetime,
     lineup_state: str = "UNKNOWN",
+    extra_provenance_blocks: list[str] | None = None,
+    constants_id: str = "",
 ) -> list[PredictionArtifact]:
     by_game = {p.game.game_id: p for p in priced}
     visible = [s for s in odds if s.game_id in by_game and s.snapshot_ts <= view.as_of]
     snap_id = data_snapshot_id(view, visible)
-    cfg_hash = all_config_hash()
+    cfg_hash = all_config_hash() if not constants_id else stable_digest([all_config_hash(), constants_id])
     out: list[PredictionArtifact] = []
-    for q in quotes_at(visible, view.as_of):
+    quotes = quotes_at(visible, view.as_of)
+    # Computed after every view access above, so the flags cover all inputs used.
+    prov_blocks = sorted(set(view.provenance_blocks() + (extra_provenance_blocks or []) + ([] if view.strict else ["NON_STRICT_VIEW"])))
+    for q in quotes:
         pg = by_game[q.key.game_id]
         game = pg.game
         team_is_home = None if q.key.team is None else q.key.team == game.home
@@ -77,6 +82,7 @@ def build_artifacts(
                 health_blocks=health.game_blocks(game.game_id),
                 odds_age_minutes=age_min,
                 goalies_confirmed=pg.both_confirmed,
+                provenance_blocks=prov_blocks,
             )
             mkey = build_market_key(game.game_id, q.key.market, sel, line, q.key.team)
             as_of_s = fmt_ts(view.as_of)

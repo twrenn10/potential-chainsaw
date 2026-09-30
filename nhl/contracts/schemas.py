@@ -9,16 +9,24 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nhl.timeutil import fmt_ts, parse_ts
+
+if TYPE_CHECKING:  # pragma: no cover
+    from nhl.data.provenance import Provenance
 
 from .enums import GoalieState, MarketType, Selection
 from .ids import canonical_game_id, canonical_player_id, canonical_team
 
 
+GAME_STATUSES = frozenset({"SCHEDULED", "LIVE", "FINAL", "PPD", "SUSP", "CNCL"})
+PRICEABLE_STATUSES = frozenset({"SCHEDULED"})
+
+
 def _to_row(obj: Any) -> dict[str, Any]:
     row = asdict(obj)
+    row.pop("provenance", None)
     for key, value in row.items():
         if isinstance(value, datetime):
             row[key] = fmt_ts(value)
@@ -37,8 +45,12 @@ class Game:
     away: str
     venue: str = ""
     available_at: datetime | None = None  # when the schedule entry was known
+    status: str = "SCHEDULED"  # SCHEDULED | LIVE | FINAL | PPD | SUSP | CNCL
+    provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.status not in GAME_STATUSES:
+            raise ValueError(f"bad game status {self.status!r}")
         object.__setattr__(self, "game_id", canonical_game_id(self.game_id))
         object.__setattr__(self, "home", canonical_team(self.home))
         object.__setattr__(self, "away", canonical_team(self.away))
@@ -66,6 +78,7 @@ class GameResult:
     end_type: str  # REG | OT | SO
     shootout_winner: str | None  # HOME | AWAY | None
     available_at: datetime
+    provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "game_id", canonical_game_id(self.game_id))
@@ -119,6 +132,7 @@ class TeamGameStats:
     penalties_against: int  # penalties drawn
     available_at: datetime
     source: str = "moneypuck"
+    provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "game_id", canonical_game_id(self.game_id))
@@ -138,6 +152,7 @@ class GoalieGameStats:
     goals_against: int
     xg_against: float
     available_at: datetime
+    provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "game_id", canonical_game_id(self.game_id))
@@ -160,6 +175,7 @@ class GoalieReport:
     state: GoalieState
     source: str
     available_at: datetime
+    provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "game_id", canonical_game_id(self.game_id))
@@ -187,6 +203,7 @@ class OddsSnapshot:
     max_stake: float | None = None  # limit observed, when the feed provides one
     source: str = ""
     snapshot_id: str = ""  # raw snapshot the row was parsed from
+    provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "snapshot_ts", parse_ts(self.snapshot_ts))
@@ -228,6 +245,7 @@ class PlayerSeason:
     on_ice_xga60_rel: float
     available_at: datetime
     extras: dict[str, float] = field(default_factory=dict)
+    provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "player_id", canonical_player_id(self.player_id))

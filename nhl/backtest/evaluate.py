@@ -30,6 +30,9 @@ from nhl.timeutil import parse_ts
 
 from .metrics import binary_report, multiclass_log_loss
 
+PROVENANCE_BLOCKS = ("HARD_BLOCK:NON_CAUSAL_INPUTS", "HARD_BLOCK:UNATTESTED_PROVENANCE", "HARD_BLOCK:NON_STRICT_VIEW",
+                     "HARD_BLOCK:UNATTESTED_ROSTER")
+
 CANONICAL = {
     MarketType.ML: Selection.HOME,
     MarketType.PUCK_LINE: Selection.HOME,
@@ -101,7 +104,9 @@ def evaluate(store: HistoricalStore, predictions: PredictionStore, mode: str = "
         b["p_close"].append(p_close)
         b["group"].append(r["game_id"])
 
+    prov_blocked = sum(1 for r in rows if any(t in r["reason_codes"] for t in PROVENANCE_BLOCKS))
     report: dict[str, Any] = {"mode": mode, "data_origins": origins, "n_artifacts": len(rows),
+                              "provenance_blocked_artifacts": prov_blocked,
                               "missing_close": missing_close, "markets": {}, "gate_version": gates["gate_version"]}
     for market, b in sorted(binary.items()):
         br = binary_report(np.array(b["y"]), np.array(b["p_model"]), np.array(b["p_close"]), np.array(b["group"]), reps, seed)
@@ -149,6 +154,8 @@ def apply_gates(report: dict[str, Any], gates: dict[str, Any]) -> dict[str, Any]
         reasons = []
         if synthetic:
             reasons.append("NOT_ELIGIBLE:SYNTHETIC_DATA")
+        if report.get("provenance_blocked_artifacts", 0) > 0:
+            reasons.append("NOT_ELIGIBLE:NON_CAUSAL_OR_UNATTESTED_INPUTS")
         if m is None:
             reasons.append("NO_SCORED_ROWS")
         else:

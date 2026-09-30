@@ -50,12 +50,15 @@ def decide(
     goalies_confirmed: bool,
     validated_markets: frozenset[str] = frozenset(),
     cfg: dict | None = None,
+    provenance_blocks: list[str] | tuple[str, ...] = (),
 ) -> LaneDecision:
     cfg = cfg or load("governance")
     reasons: list[str] = []
     if data_origin == DataOrigin.SYNTHETIC.value:
         reasons.append("HARD_BLOCK:SYNTHETIC_SOURCE")
     reasons.extend(f"HARD_BLOCK:{b}" for b in health_blocks)
+    # Temporal provenance: non-causal, unattested or non-strict inputs can never be promoted.
+    reasons.extend(f"HARD_BLOCK:{b}" for b in provenance_blocks)
     if odds_age_minutes > cfg["max_odds_age_minutes"]:
         reasons.append("HARD_BLOCK:STALE_PRICE")
     shadow = shadow_lane(market, edge, cfg)

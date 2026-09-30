@@ -58,27 +58,71 @@ class HistoricalStore:
     data_origin: str = "HISTORICAL"
 
     def game(self, game_id: str) -> Game:
-        for g in self.games:
-            if g.game_id == game_id:
-                return g
-        raise KeyError(game_id)
+        """Latest known version (post-hoc use only: evaluation, grading)."""
 
-    def view(self, as_of: str | datetime) -> "PointInTimeView":
-        return PointInTimeView(self, parse_ts(as_of))
+        versions = [g for g in self.games if g.game_id == game_id]
+        if not versions:
+            raise KeyError(game_id)
+        return max(versions, key=lambda g: (g.available_at is not None, g.available_at or g.start_time))
+
+    def latest_games(self) -> dict[str, Game]:
+        return {gid: self.game(gid) for gid in sorted({g.game_id for g in self.games})}
+
+    def view(self, as_of: str | datetime, strict: bool = True) -> "PointInTimeView":
+        return PointInTimeView(self, parse_ts(as_of), strict=strict)
 
 
 class PointInTimeView:
-    def __init__(self, store: HistoricalStore, as_of: datetime) -> None:
+    """``strict=True`` (default): records whose provenance is NON-CAUSAL are invisible.
+    ``strict=False`` is for diagnostics only; any non-causal record it returns sets
+    ``non_causal_used`` and governance hard-blocks the resulting predictions.
+
+    Records with no provenance at all set ``unattested_used`` (legacy/synthetic
+    paths); governance hard-blocks those for non-synthetic data origins.
+    """
+
+    def __init__(self, store: HistoricalStore, as_of: datetime, strict: bool = True) -> None:
         self._store = store
         self.as_of = as_of
+        self.strict = strict
         self.data_origin = store.data_origin
+        self.non_causal_used = False
+        self.non_causal_hidden = 0
+        self.unattested_used = False
 
     def _visible(self, rows: Iterable[T]) -> list[T]:
-        return [r for r in rows if r.available_at is None or r.available_at <= self.as_of]
+        out = []
+        for r in rows:
+            if r.available_at is not None and r.available_at > self.as_of:
+                continue
+            prov = getattr(r, "provenance", None)
+            if prov is None:
+                self.unattested_used = True
+            elif not prov.causal:
+                if self.strict:
+                    self.non_causal_hidden += 1
+                    continue
+                self.non_causal_used = True
+            out.append(r)
+        return out
 
-    # Schedule: a game is listed if the schedule entry was known; its RESULT is separate.
+    def provenance_blocks(self) -> list[str]:
+        blocks = []
+        if self.non_causal_used:
+            blocks.append("NON_CAUSAL_INPUTS")
+        if self.unattested_used and self.data_origin != "SYNTHETIC":
+            blocks.append("UNATTESTED_PROVENANCE")
+        return blocks
+
+    # Schedule: the LATEST version of each game known at as_of (reschedules and
+    # postponements are new versions, never edits). Results are separate.
     def games(self) -> list[Game]:
-        return self._visible(self._store.games)
+        latest: dict[str, Game] = {}
+        for g in self._visible(self._store.games):
+            cur = latest.get(g.game_id)
+            if cur is None or (g.available_at or self.as_of) >= (cur.available_at or self.as_of):
+                latest[g.game_id] = g
+        return sorted(latest.values(), key=lambda g: (g.start_time, g.game_id))
 
     def results(self) -> list[GameResult]:
         return self._visible(self._store.results)
@@ -106,9 +150,7 @@ class PointInTimeView:
         """Latest visible price per (book, market, team, line, selection)."""
 
         latest: dict[tuple, OddsSnapshot] = {}
-        for s in self._store.odds:
-            if s.game_id != game_id or s.snapshot_ts > self.as_of:
-                continue
+        for s in self._visible(o for o in self._store.odds if o.game_id == game_id):
             if market is not None and s.market is not market:
                 continue
             key = (s.book, s.market, s.team, s.line, s.selection)
@@ -119,14 +161,14 @@ class PointInTimeView:
     def odds_snapshots(self, game_ids: set[str]) -> list[OddsSnapshot]:
         """Every visible odds observation (full history up to as_of) for these games."""
 
-        return [s for s in self._store.odds if s.game_id in game_ids and s.snapshot_ts <= self.as_of]
+        return self._visible(s for s in self._store.odds if s.game_id in game_ids)
 
     def team_games_played(self) -> dict[str, list[str]]:
         """Game ids with visible results per team, chronological."""
 
-        start = {g.game_id: g.start_time for g in self._store.games}
+        games = {g.game_id: g for g in self.games()}
+        start = {gid: g.start_time for gid, g in games.items()}
         by_team: dict[str, list[tuple[datetime, str]]] = defaultdict(list)
-        games = {g.game_id: g for g in self._store.games}
         for r in self.results():
             g = games.get(r.game_id)
             if g is None:

@@ -1,0 +1,4 @@
+{
+  "_doc": "Attestations that a MoneyPuck xG model version was trained only on seasons <= trained_through_season and published at published_at. Rows of later seasons, backfilled after the fact, become causal ONLY through an attestation here. Empty = no backfilled MoneyPuck xG is causal. Format: {attestation_id, model_id, trained_through_season, published_at, evidence}.",
+  "attestations": []
+}

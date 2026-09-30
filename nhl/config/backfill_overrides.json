@@ -1,0 +1,4 @@
+{
+  "_doc": "Documented historical-availability overrides for BACKFILLED data. Each entry must cite evidence; never add an entry without it. Format: schedule.<season> = {override_id, available_at (UTC ISO), evidence}. Postponed/rescheduled games inside an overridden season are a documented residual (docs/temporal_provenance.md).",
+  "schedule": {}
+}
