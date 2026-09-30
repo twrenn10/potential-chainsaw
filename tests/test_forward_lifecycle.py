@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 from nhl.backtest.walk_forward import slate_days
 from nhl.contracts import GoalieReport, GoalieState
