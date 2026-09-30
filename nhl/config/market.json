@@ -1,0 +1,19 @@
+{
+  "_doc": "Market-data contract and closing-line rule. Values marked PROVISIONAL are operational choices, not scientifically established. Changing close_rule semantics requires a new close_rule_version.",
+  "novig_method": "multiplicative",
+  "max_leg_skew_minutes": 5,
+  "min_overround": 0.0,
+  "max_overround": {"two_way": 0.15, "three_way": 0.25, "_status": "PROVISIONAL"},
+  "max_quote_age_minutes": 30,
+  "close_rule": "LAST_COMPLETE_VALID_BEFORE_PUCK_DROP",
+  "close_rule_version": "close-v1",
+  "max_close_staleness_minutes": {"value": 60, "_status": "PROVISIONAL"},
+  "lines": {
+    "PUCK_LINE": {"min_abs": 0.5, "max_abs": 5.0, "step": 0.5},
+    "TOTAL": {"min": 0.5, "max": 20.0, "step": 0.5},
+    "TEAM_TOTAL": {"min": 0.5, "max": 12.0, "step": 0.5},
+    "GOALIE_SAVES": {"min": 5.0, "max": 70.0, "step": 0.5},
+    "PLAYER_SOG": {"min": 0.5, "max": 15.0, "step": 0.5}
+  },
+  "price_limits": {"american_abs_max": 100000, "decimal_min": 1.001, "decimal_max": 1001.0}
+}

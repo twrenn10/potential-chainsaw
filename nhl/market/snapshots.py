@@ -1,8 +1,17 @@
-"""Market views over timestamped odds: reference price at as_of, open/close, movement marks.
+"""Market views over timestamped observations: quotes at ``as_of``, the close, movement.
 
-A "market group" is every outcome of one book's market at one line (e.g. BookA
-TOTAL 6.5 OVER+UNDER). No-vig probabilities require the complete group observed
-from the same book, each price no older than ``max_pair_skew`` from the newest.
+A *market group* is every outcome of one book's market for one game, period, line,
+team/participant (e.g. BookA TOTAL 6.5 OVER+UNDER). A group quote exists only when
+the group is COMPLETE, every leg's latest observation is OPEN, the legs were observed
+within ``max_leg_skew_minutes`` of each other, and the no-vig transform accepts the
+prices (see ``nhl.market.novig.no_vig``). Anything else is a rejected group with a
+reason -- it is never normalised into a quote.
+
+Closing line (``close_rule_version`` in ``nhl/config/market.json``): the final valid,
+complete group state observed strictly before puck drop. Actual puck drop is used
+when known; otherwise scheduled puck drop, labelled ``SCHEDULED_FALLBACK``. If the
+final state is suspended, incomplete, non-contemporaneous, malformed or stale, the
+close is UNAVAILABLE. No earlier quote is substituted.
 """
 
 from __future__ import annotations
@@ -12,9 +21,10 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from nhl.contracts import MarketType, OddsSnapshot, Selection
+from nhl.config import load
+from nhl.contracts import MarketStatus, MarketType, OddsSnapshot, Period, Selection
 
-from .novig import devig
+from .novig import MalformedMarket, NoVigResult, no_vig
 
 ET = ZoneInfo("America/New_York")
 SELECTIONS = {
@@ -23,6 +33,8 @@ SELECTIONS = {
     MarketType.PUCK_LINE: (Selection.HOME, Selection.AWAY),
     MarketType.TOTAL: (Selection.OVER, Selection.UNDER),
     MarketType.TEAM_TOTAL: (Selection.OVER, Selection.UNDER),
+    MarketType.GOALIE_SAVES: (Selection.OVER, Selection.UNDER),
+    MarketType.PLAYER_SOG: (Selection.OVER, Selection.UNDER),
 }
 
 
@@ -32,6 +44,27 @@ class GroupKey:
     market: MarketType
     line: float | None  # PUCK_LINE keyed by the HOME line
     team: str | None
+    period: Period | None = None
+    participant: str | None = None
+
+    def __post_init__(self) -> None:
+        # Normalise so keys built from artifacts and from observations compare equal.
+        object.__setattr__(self, "period", Period(self.period) if self.period else self.market.default_period)
+
+    @property
+    def market_id(self) -> str:
+        """Deterministic, book-agnostic id of the market group."""
+
+        period = self.period or self.market.default_period
+        head = self.market.value if period is self.market.default_period else f"{self.market.value}@{period.value}"
+        parts = [self.game_id, head]
+        if self.team:
+            parts.append(self.team)
+        if self.participant:
+            parts.append(f"P{self.participant}")
+        if self.line is not None:
+            parts.append(f"{self.line:+.1f}")
+        return ":".join(parts)
 
 
 @dataclass(frozen=True)
@@ -39,58 +72,114 @@ class GroupQuote:
     key: GroupKey
     book: str
     observed_at: datetime  # newest leg
-    prices: dict[Selection, int]
-    no_vig: dict[Selection, float]
+    oldest_leg_at: datetime
+    prices: dict[Selection, int]  # American (display)
+    decimals: dict[Selection, float]  # exact prices used for all maths
+    novig: NoVigResult
     max_stake: float | None
+    legs: tuple[tuple[str, str, str], ...]  # (selection, observed_at ISO, snapshot_id)
+    provider: str
+
+    @property
+    def no_vig(self) -> dict[Selection, float]:
+        return {Selection(s): p for s, p in zip(self.novig.selections, self.novig.no_vig)}
+
+    @property
+    def raw_implied(self) -> dict[Selection, float]:
+        return {Selection(s): p for s, p in zip(self.novig.selections, self.novig.raw_implied)}
+
+    @property
+    def ref(self) -> str:
+        """Market snapshot reference: the exact observations the quote was built from."""
+
+        return "|".join(f"{s}@{t}#{sid}" for s, t, sid in self.legs)
+
+
+@dataclass(frozen=True)
+class GroupReject:
+    key: GroupKey
+    book: str
+    reason: str
 
 
 def group_key(s: OddsSnapshot) -> GroupKey:
     line = s.line
     if s.market is MarketType.PUCK_LINE and s.selection is Selection.AWAY and line is not None:
         line = -line
-    return GroupKey(s.game_id, s.market, line, s.team)
+    return GroupKey(s.game_id, s.market, line, s.team, s.period, s.participant)
 
 
-def quotes_at(
-    odds: list[OddsSnapshot],
-    as_of: datetime,
-    max_pair_skew: timedelta = timedelta(minutes=5),
-    method: str = "multiplicative",
-) -> list[GroupQuote]:
-    """Latest complete, de-vigged group per (book, group) visible at ``as_of``."""
+def _cfg() -> dict:
+    return load("market")
 
-    latest: dict[tuple[str, GroupKey, Selection], OddsSnapshot] = {}
+
+def _evaluate_group(
+    book: str, gk: GroupKey, legs: dict[Selection, list[OddsSnapshot]], cfg: dict, method: str | None
+) -> GroupQuote | GroupReject:
+    needed = SELECTIONS[gk.market]
+    latest: dict[Selection, OddsSnapshot] = {}
+    for sel in needed:
+        obs = legs.get(sel)
+        if not obs:
+            return GroupReject(gk, book, f"INCOMPLETE:missing {sel.value}")
+        newest = max(o.snapshot_ts for o in obs)
+        at_newest = [o for o in obs if o.snapshot_ts == newest]
+        if len({(o.decimal, o.market_status) for o in at_newest}) > 1:
+            return GroupReject(gk, book, f"DUPLICATED_SELECTION:conflicting {sel.value} observations at one instant")
+        latest[sel] = at_newest[0]
+    for sel, o in latest.items():
+        if o.market_status is not MarketStatus.OPEN:
+            return GroupReject(gk, book, f"{o.market_status.value}:{sel.value}")
+    times = [latest[s].snapshot_ts for s in needed]
+    if max(times) - min(times) > timedelta(minutes=cfg["max_leg_skew_minutes"]):
+        return GroupReject(gk, book, "LEGS_NOT_CONTEMPORANEOUS")
+    max_over = cfg["max_overround"]["three_way" if len(needed) == 3 else "two_way"]
+    try:
+        nv = no_vig([s.value for s in needed], [latest[s].decimal for s in needed], method or cfg["novig_method"],
+                    cfg["min_overround"], max_over)
+    except MalformedMarket as exc:
+        return GroupReject(gk, book, f"MALFORMED:{exc}")
+    stakes = [latest[s].max_stake for s in needed if latest[s].max_stake is not None]
+    return GroupQuote(
+        key=gk, book=book, observed_at=max(times), oldest_leg_at=min(times),
+        prices={s: latest[s].price_american for s in needed}, decimals={s: latest[s].decimal for s in needed},
+        novig=nv, max_stake=min(stakes) if stakes else None,
+        legs=tuple((s.value, latest[s].snapshot_ts.strftime("%Y-%m-%dT%H:%M:%SZ"), latest[s].snapshot_id) for s in needed),
+        provider=latest[needed[0]].provider or latest[needed[0]].source,
+    )
+
+
+def _grouped(odds: list[OddsSnapshot], cutoff: datetime, inclusive: bool = True) -> dict[tuple[str, GroupKey], dict[Selection, list[OddsSnapshot]]]:
+    groups: dict[tuple[str, GroupKey], dict[Selection, list[OddsSnapshot]]] = defaultdict(lambda: defaultdict(list))
     for s in odds:
-        if s.snapshot_ts > as_of:
+        if s.snapshot_ts > cutoff or (not inclusive and s.snapshot_ts == cutoff):
             continue
-        k = (s.book, group_key(s), s.selection)
-        if k not in latest or s.snapshot_ts >= latest[k].snapshot_ts:
-            latest[k] = s
-    groups: dict[tuple[str, GroupKey], dict[Selection, OddsSnapshot]] = defaultdict(dict)
-    for (book, gk, sel), s in latest.items():
-        groups[(book, gk)][sel] = s
-    out = []
-    for (book, gk), legs in sorted(groups.items(), key=lambda kv: (kv[0][1].game_id, kv[0][1].market.value, str(kv[0][1].line), kv[0][1].team or "", kv[0][0])):
-        needed = SELECTIONS[gk.market]
-        if any(sel not in legs for sel in needed):
-            continue
-        times = [legs[sel].snapshot_ts for sel in needed]
-        if max(times) - min(times) > max_pair_skew:
-            continue
-        prices = {sel: legs[sel].price_american for sel in needed}
-        probs = devig([prices[sel] for sel in needed], method)
-        stakes = [legs[sel].max_stake for sel in needed if legs[sel].max_stake is not None]
-        out.append(
-            GroupQuote(
-                key=gk,
-                book=book,
-                observed_at=max(times),
-                prices=prices,
-                no_vig=dict(zip(needed, probs)),
-                max_stake=min(stakes) if stakes else None,
-            )
-        )
-    return out
+        groups[(s.book, group_key(s))][s.selection].append(s)
+    return groups
+
+
+def _order(item) -> tuple:
+    (book, gk) = item[0]
+    return (gk.game_id, gk.market.value, (gk.period or gk.market.default_period).value, gk.team or "",
+            gk.participant or "", str(gk.line), book)
+
+
+def quote_groups(
+    odds: list[OddsSnapshot], as_of: datetime, method: str | None = None
+) -> tuple[list[GroupQuote], list[GroupReject]]:
+    """Latest state of every (book, group) visible at ``as_of``: valid quotes and rejects."""
+
+    cfg = _cfg()
+    quotes, rejects = [], []
+    for (book, gk), legs in sorted(_grouped(odds, as_of).items(), key=_order):
+        r = _evaluate_group(book, gk, legs, cfg, method)
+        (quotes if isinstance(r, GroupQuote) else rejects).append(r)
+    return quotes, rejects
+
+
+def quotes_at(odds: list[OddsSnapshot], as_of: datetime, max_pair_skew: timedelta | None = None,
+              method: str | None = None) -> list[GroupQuote]:
+    return quote_groups(odds, as_of, method)[0]
 
 
 def consensus_no_vig(quotes: list[GroupQuote]) -> dict[GroupKey, dict[Selection, float]]:
@@ -99,16 +188,66 @@ def consensus_no_vig(quotes: list[GroupQuote]) -> dict[GroupKey, dict[Selection,
     acc: dict[GroupKey, list[dict[Selection, float]]] = defaultdict(list)
     for q in quotes:
         acc[q.key].append(q.no_vig)
-    out = {}
-    for gk, rows in acc.items():
-        out[gk] = {sel: sum(r[sel] for r in rows) / len(rows) for sel in rows[0]}
+    return {gk: {sel: sum(r[sel] for r in rows) / len(rows) for sel in rows[0]} for gk, rows in acc.items()}
+
+
+# --------------------------------------------------------------------------- close
+
+@dataclass(frozen=True)
+class CloseSelection:
+    game_id: str
+    book: str
+    market_id: str
+    key: GroupKey
+    status: str  # AVAILABLE | UNAVAILABLE
+    reason: str  # "" when available
+    rule: str
+    rule_version: str
+    cutoff: datetime
+    cutoff_basis: str  # ACTUAL | SCHEDULED_FALLBACK
+    quote: GroupQuote | None
+    staleness_minutes: float | None
+
+    @property
+    def available(self) -> bool:
+        return self.status == "AVAILABLE"
+
+
+def close_cutoff(scheduled: datetime, actual: datetime | None) -> tuple[datetime, str]:
+    if actual is not None:
+        return actual, "ACTUAL"
+    return scheduled, "SCHEDULED_FALLBACK"
+
+
+def select_closes(
+    odds: list[OddsSnapshot], scheduled_start: datetime, actual_start: datetime | None = None, method: str | None = None
+) -> list[CloseSelection]:
+    """One CloseSelection (available or not) for every (book, group) observed before the cutoff."""
+
+    cfg = _cfg()
+    cutoff, basis = close_cutoff(scheduled_start, actual_start)
+    max_stale = timedelta(minutes=cfg["max_close_staleness_minutes"]["value"])
+    out = []
+    for (book, gk), legs in sorted(_grouped(odds, cutoff, inclusive=False).items(), key=_order):
+        r = _evaluate_group(book, gk, legs, cfg, method)
+        common = dict(game_id=gk.game_id, book=book, market_id=gk.market_id, key=gk, rule=cfg["close_rule"],
+                      rule_version=cfg["close_rule_version"], cutoff=cutoff, cutoff_basis=basis)
+        if isinstance(r, GroupReject):
+            out.append(CloseSelection(status="UNAVAILABLE", reason=r.reason, quote=None, staleness_minutes=None, **common))
+            continue
+        stale = (cutoff - r.oldest_leg_at).total_seconds() / 60.0
+        if cutoff - r.oldest_leg_at > max_stale:
+            out.append(CloseSelection(status="UNAVAILABLE", reason=f"STALE:{stale:.1f}min", quote=None,
+                                      staleness_minutes=stale, **common))
+            continue
+        out.append(CloseSelection(status="AVAILABLE", reason="", quote=r, staleness_minutes=stale, **common))
     return out
 
 
-def closing_quotes(odds: list[OddsSnapshot], puck_drop: datetime) -> list[GroupQuote]:
-    """Close = last complete quote strictly before puck drop."""
+def closing_quotes(odds: list[OddsSnapshot], puck_drop: datetime, actual_start: datetime | None = None) -> list[GroupQuote]:
+    """Valid closes only (compat helper)."""
 
-    return quotes_at(odds, puck_drop - timedelta(seconds=1))
+    return [c.quote for c in select_closes(odds, puck_drop, actual_start) if c.available and c.quote is not None]
 
 
 def movement_marks(puck_drop: datetime) -> dict[str, datetime]:
@@ -126,16 +265,21 @@ def movement_marks(puck_drop: datetime) -> dict[str, datetime]:
 
 
 def opening_quotes(odds: list[OddsSnapshot]) -> list[GroupQuote]:
-    """First complete quote per (book, group)."""
+    """First valid quote per (book, group)."""
 
+    cfg = _cfg()
     by_group: dict[tuple[str, GroupKey], list[OddsSnapshot]] = defaultdict(list)
     for s in odds:
         by_group[(s.book, group_key(s))].append(s)
     out = []
-    for (_book, _gk), rows in sorted(by_group.items(), key=lambda kv: (kv[0][1].game_id, kv[0][1].market.value, str(kv[0][1].line), kv[0][1].team or "", kv[0][0])):
+    for (book, gk), rows in sorted(by_group.items(), key=lambda kv: _order((kv[0], None))):
         for ts in sorted({r.snapshot_ts for r in rows}):
-            qs = quotes_at(rows, ts)
-            if qs:
-                out.append(qs[0])
+            legs: dict[Selection, list[OddsSnapshot]] = defaultdict(list)
+            for r in rows:
+                if r.snapshot_ts <= ts:
+                    legs[r.selection].append(r)
+            q = _evaluate_group(book, gk, legs, cfg, None)
+            if isinstance(q, GroupQuote):
+                out.append(q)
                 break
     return out

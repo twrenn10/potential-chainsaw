@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from hashlib import sha1
 
-from .enums import MarketType, Selection
+from .enums import MarketType, Period, Selection
 
 TEAMS: frozenset[str] = frozenset(
     {
@@ -80,20 +80,35 @@ def build_market_key(
     selection: Selection,
     line: float | None = None,
     team: str | None = None,
+    period: Period | None = None,
+    participant: str | None = None,
 ) -> str:
-    """Book-agnostic key for one priced outcome (e.g. ``2026020001:TOTAL:OVER:+6.5``).
+    """Book-agnostic key for one outcome (e.g. ``2026020001:TOTAL:OVER:+6.5``).
 
-    ``team`` is required for TEAM_TOTAL so home/away team totals stay distinct.
+    Deterministic and structurally distinct: the period is included whenever it is
+    not the market's default (``2026020001:TOTAL@P1:OVER:+1.5``); ``team`` is
+    required for TEAM_TOTAL and ``participant`` (NHL player id) for props, so
+    different teams/players never share a key.
     """
 
     canonical_game_id(game_id)
     if market.has_line and line is None:
         raise ValueError(f"{market.value} requires a line")
+    if not market.has_line and line is not None:
+        raise ValueError(f"{market.value} takes no line")
     if market is MarketType.TEAM_TOTAL and not team:
         raise ValueError("TEAM_TOTAL requires team")
-    parts = [game_id, market.value]
+    if market.is_prop and not participant:
+        raise ValueError(f"{market.value} requires participant")
+    if not market.is_prop and participant:
+        raise ValueError(f"{market.value} takes no participant")
+    period = Period(period) if period is not None else market.default_period
+    head = market.value if period is market.default_period else f"{market.value}@{period.value}"
+    parts = [game_id, head]
     if team:
         parts.append(canonical_team(team))
+    if participant:
+        parts.append(f"P{canonical_player_id(participant)}")
     parts.append(selection.value)
     if line is not None:
         parts.append(format_line(line))

@@ -7,6 +7,7 @@ that field (never the event date) to decide visibility at an ``as_of``.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -16,7 +17,7 @@ from nhl.timeutil import fmt_ts, parse_ts
 if TYPE_CHECKING:  # pragma: no cover
     from nhl.data.provenance import Provenance
 
-from .enums import GoalieState, MarketType, Selection
+from .enums import GoalieState, MarketStatus, MarketType, OddsFormat, Period, Selection
 from .ids import canonical_game_id, canonical_player_id, canonical_team
 
 
@@ -79,10 +80,13 @@ class GameResult:
     shootout_winner: str | None  # HOME | AWAY | None
     available_at: datetime
     provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
+    actual_start: datetime | None = None  # actual puck drop when a source provides it
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "game_id", canonical_game_id(self.game_id))
         object.__setattr__(self, "available_at", parse_ts(self.available_at))
+        if self.actual_start is not None:
+            object.__setattr__(self, "actual_start", parse_ts(self.actual_start))
         if self.end_type not in {"REG", "OT", "SO"}:
             raise ValueError(f"bad end_type {self.end_type}")
         if self.end_type == "SO" and self.shootout_winner not in {"HOME", "AWAY"}:
@@ -187,9 +191,19 @@ class GoalieReport:
 
 @dataclass(frozen=True)
 class OddsSnapshot:
-    """One book's price for one outcome at one observed instant.
+    """One market observation: one book's price for one outcome at one instant.
 
-    ``snapshot_ts`` is when the price was observed; it doubles as ``available_at``.
+    Timestamps (all UTC):
+    * ``snapshot_ts`` -- OBSERVATION time: when the price was seen (by the provider or
+      us). It is the instant from which this price is known to exist, so it doubles
+      as ``available_at``.
+    * ``source_ts`` -- the provider's own last-change time for the price, if given
+      (must be <= ``snapshot_ts``).
+    * fetch time lives in ``provenance.fetched_at`` (must be >= ``snapshot_ts``).
+
+    Price: ``price_american`` is always present (display/legacy). When the source
+    quoted DECIMAL, the exact value is kept in ``price_decimal`` and all probability
+    maths uses ``decimal``; nothing is re-rounded silently.
     """
 
     snapshot_ts: datetime
@@ -204,28 +218,101 @@ class OddsSnapshot:
     source: str = ""
     snapshot_id: str = ""  # raw snapshot the row was parsed from
     provenance: "Provenance | None" = field(default=None, compare=False, repr=False)
+    period: Period | None = None  # defaults to the market's settlement period
+    participant: str | None = None  # NHL player id for props
+    odds_format: OddsFormat = OddsFormat.AMERICAN
+    price_decimal: float | None = None
+    source_ts: datetime | None = None
+    market_status: MarketStatus = MarketStatus.OPEN
+    provider: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "snapshot_ts", parse_ts(self.snapshot_ts))
         object.__setattr__(self, "game_id", canonical_game_id(self.game_id))
         object.__setattr__(self, "market", MarketType(self.market))
         object.__setattr__(self, "selection", Selection(self.selection))
+        object.__setattr__(self, "odds_format", OddsFormat(self.odds_format))
+        object.__setattr__(self, "market_status", MarketStatus(self.market_status))
+        object.__setattr__(self, "period", Period(self.period) if self.period else self.market.default_period)
         if self.team:
             object.__setattr__(self, "team", canonical_team(self.team))
+        if self.participant:
+            object.__setattr__(self, "participant", canonical_player_id(self.participant))
+        if self.source_ts is not None:
+            object.__setattr__(self, "source_ts", parse_ts(self.source_ts))
+            if self.source_ts > self.snapshot_ts:
+                raise ValueError("source_ts after observation time")
         if not self.book.strip():
             raise ValueError("book required")
-        p = int(self.price_american)
-        if -100 < p < 100:
-            raise ValueError(f"invalid American price {p}")
-        if self.market.has_line and self.line is None:
-            raise ValueError(f"{self.market.value} snapshot needs line")
+        validate_selection(self.market, self.selection)
+        validate_line(self.market, self.selection, self.line)
+        if (self.market is MarketType.TEAM_TOTAL) != bool(self.team):
+            raise ValueError("team is required for TEAM_TOTAL and only for TEAM_TOTAL")
+        if self.market.is_prop != bool(self.participant):
+            raise ValueError("participant is required for props and only for props")
+        validate_price(self.price_american, self.price_decimal, self.odds_format)
 
     @property
     def available_at(self) -> datetime:
         return self.snapshot_ts
 
+    @property
+    def decimal(self) -> float:
+        if self.price_decimal is not None:
+            return float(self.price_decimal)
+        p = float(self.price_american)
+        return 1.0 + (p / 100.0 if p > 0 else 100.0 / -p)
+
     def to_row(self) -> dict[str, Any]:
         return _to_row(self)
+
+
+def _market_cfg() -> dict:
+    from nhl.config import load
+
+    return load("market")
+
+
+def validate_selection(market: MarketType, selection: Selection) -> None:
+    allowed = {
+        MarketType.ML: {Selection.HOME, Selection.AWAY},
+        MarketType.REG_3WAY: {Selection.HOME, Selection.DRAW, Selection.AWAY},
+        MarketType.PUCK_LINE: {Selection.HOME, Selection.AWAY},
+    }.get(market, {Selection.OVER, Selection.UNDER})
+    if selection not in allowed:
+        raise ValueError(f"selection {selection.value} impossible for {market.value}")
+
+
+def validate_line(market: MarketType, selection: Selection, line: float | None) -> None:
+    if not market.has_line:
+        if line is not None:
+            raise ValueError(f"{market.value} takes no line")
+        return
+    if line is None:
+        raise ValueError(f"{market.value} snapshot needs line")
+    rule = _market_cfg()["lines"][market.value]
+    x = float(line)
+    if not math.isfinite(x) or abs(x / rule["step"] - round(x / rule["step"])) > 1e-9:
+        raise ValueError(f"{market.value} line {line} not a multiple of {rule['step']}")
+    if market is MarketType.PUCK_LINE:
+        if not rule["min_abs"] <= abs(x) <= rule["max_abs"]:
+            raise ValueError(f"impossible puck line {line}")
+    elif not rule["min"] <= x <= rule["max"]:
+        raise ValueError(f"impossible {market.value} line {line}")
+
+
+def validate_price(american: int, decimal: float | None, fmt: "OddsFormat") -> None:
+    lim = _market_cfg()["price_limits"]
+    if isinstance(american, bool) or int(american) != american:
+        raise ValueError(f"American price must be an integer: {american!r}")
+    a = int(american)
+    if -100 < a < 100 or abs(a) > lim["american_abs_max"]:
+        raise ValueError(f"invalid American price {a}")
+    if fmt is OddsFormat.DECIMAL:
+        if decimal is None or not math.isfinite(decimal) or not lim["decimal_min"] <= decimal <= lim["decimal_max"]:
+            raise ValueError(f"invalid decimal price {decimal!r}")
+    elif decimal is not None:
+        raise ValueError("price_decimal is only set for DECIMAL-format sources")
 
 
 @dataclass(frozen=True)

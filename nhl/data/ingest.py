@@ -31,7 +31,7 @@ from .nhl_api import (
     parse_roster_checked,
     parse_schedule_checked,
 )
-from .odds import parse_goalie_reports_checked, parse_odds_checked
+from .odds import is_market_v2, parse_goalie_reports_checked, parse_market_observations_checked, parse_odds_checked
 from .pit import HistoricalStore
 from .snapshots import RawSnapshotStore, SnapshotEntry
 from .validation import Rejection
@@ -197,7 +197,8 @@ def replay(
     rep.note("team_stats", store.team_stats)
 
     for e in (e for e in entries if e.source == "odds"):
-        res = parse_odds_checked(raw.get_bytes(e), e)
+        payload = raw.get_bytes(e)
+        res = parse_market_observations_checked(payload, e) if is_market_v2(payload) else parse_odds_checked(payload, e)
         rep.absorb("odds", res)
         store.odds.extend(res.records)
     rep.note("odds", store.odds)

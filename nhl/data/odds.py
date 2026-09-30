@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import io
+from dataclasses import dataclass
 from datetime import datetime
 
 from nhl.contracts import GoalieReport, GoalieState, MarketType, OddsSnapshot, Selection
@@ -74,6 +75,7 @@ def ingest_odds_file(store: RawSnapshotStore, key: str, payload: bytes, fetched_
     return res.require_clean(), res.dupes
 
 
+@dataclass
 class OddsParseResult(ParseResult[OddsSnapshot]):
     dupes: int = 0
 
@@ -175,4 +177,98 @@ def odds_to_csv(rows: list[OddsSnapshot]) -> str:
     for s in rows:
         row = s.to_row()
         writer.writerow({c: ("" if row.get(c) is None else row.get(c)) for c in ODDS_COLUMNS})
+    return buf.getvalue()
+
+
+# --------------------------------------------------------------------------- v2 contract
+
+MARKET_COLUMNS = ("provider", "source_ts", "observed_at", "game_id", "book", "market", "period", "selection", "line",
+                  "team", "participant_id", "price", "odds_format", "status", "max_stake")
+
+
+def is_market_v2(payload: bytes) -> bool:
+    head = payload.decode("utf-8-sig").split("\n", 1)[0].strip().split(",")
+    return set(MARKET_COLUMNS) <= set(head)
+
+
+def parse_market_observations_checked(payload: bytes, entry: SnapshotEntry) -> OddsParseResult:
+    """Provider-neutral market observation contract (see docs/odds_and_close_methodology.md).
+
+    Per row: provider identity, provider ``source_ts`` (optional, <= observed_at),
+    ``observed_at`` (observation time, <= fetch time), game, book, market, period,
+    selection, line, team/participant, price in its ORIGINAL format, market status.
+    Rows are rejected -- never repaired -- when any field is missing, impossible or
+    ambiguous; same-instant duplicates with different prices/status are dropped.
+    """
+
+    from nhl.contracts import MarketStatus, OddsFormat, Period
+    from nhl.market.novig import decimal_to_american
+
+    out = OddsParseResult()
+    reader = csv.DictReader(io.StringIO(payload.decode("utf-8-sig")))
+    _check_columns(reader, MARKET_COLUMNS)
+    seen: dict[tuple, OddsSnapshot] = {}
+    for i, r in enumerate(reader):
+        key = f"row{i + 2}:{r.get('game_id')}:{r.get('market')}:{r.get('selection')}"
+        try:
+            provider = (r["provider"] or "").strip()
+            if not provider:
+                raise FieldError("provider required")
+            observed = strict_utc(r["observed_at"], "observed_at")
+            source_ts = strict_utc(r["source_ts"], "source_ts") if (r["source_ts"] or "").strip() else None
+            fmt = OddsFormat((r["odds_format"] or "").strip().upper())
+            if fmt is OddsFormat.AMERICAN:
+                american, dec = strict_int(r["price"], "price", None), None
+            else:
+                from .validation import strict_float
+
+                dec = strict_float(r["price"], "price", 1.0)
+                american = decimal_to_american(dec)
+            status = MarketStatus((r["status"] or "").strip().upper())
+            p = prov.published_report(f"odds:{provider}", entry.snapshot_id, entry.fetched_at, observed, observed,
+                                      prov.CaptureMode.BACKFILL, source_version=provider)
+            period_raw = (r["period"] or "").strip().upper()
+            snap = OddsSnapshot(
+                snapshot_ts=observed, book=r["book"].strip().lower(), game_id=r["game_id"],
+                market=MarketType(r["market"].strip().upper()), selection=Selection(r["selection"].strip().upper()),
+                price_american=american, line=_opt_float(r["line"]), team=(r["team"] or "").strip() or None,
+                max_stake=_opt_float(r["max_stake"]), source=provider, snapshot_id=entry.snapshot_id, provenance=p,
+                period=Period(period_raw) if period_raw else None,
+                participant=(r["participant_id"] or "").strip() or None, odds_format=fmt, price_decimal=dec,
+                source_ts=source_ts, market_status=status, provider=provider,
+            )
+        except (FieldError, prov.ProvenanceError, ValueError, KeyError) as exc:
+            out.reject("market", key, str(exc))
+            continue
+        k = (snap.snapshot_ts, snap.book, snap.game_id, snap.market, snap.period, snap.selection, snap.line, snap.team,
+             snap.participant, snap.provider)
+        if k in seen:
+            prev = seen[k]
+            if (prev.decimal, prev.market_status) == (snap.decimal, snap.market_status):
+                out.dupes += 1
+            else:
+                out.reject("market", key, "conflicting observations for the same outcome and instant")
+                if prev in out.records:
+                    out.records.remove(prev)
+            continue
+        seen[k] = snap
+        out.records.append(snap)
+    out.records.sort(key=lambda s: (s.game_id, s.market.value, s.period.value, s.team or "", s.participant or "",
+                                    s.line or 0.0, s.selection.value, s.book, s.snapshot_ts))
+    return out
+
+
+def market_observations_to_csv(rows: list[OddsSnapshot]) -> str:
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=list(MARKET_COLUMNS), lineterminator="\n")
+    w.writeheader()
+    for s in rows:
+        w.writerow({
+            "provider": s.provider or s.source, "source_ts": "" if s.source_ts is None else s.source_ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "observed_at": s.snapshot_ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "game_id": s.game_id, "book": s.book,
+            "market": s.market.value, "period": s.period.value, "selection": s.selection.value,
+            "line": "" if s.line is None else s.line, "team": s.team or "", "participant_id": s.participant or "",
+            "price": s.price_american if s.price_decimal is None else s.price_decimal, "odds_format": s.odds_format.value,
+            "status": s.market_status.value, "max_stake": "" if s.max_stake is None else s.max_stake,
+        })
     return buf.getvalue()
