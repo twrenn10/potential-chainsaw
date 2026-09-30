@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from nhl.config import load
 from nhl.contracts import Game, PredictionMode
 from nhl.data.pit import HistoricalStore
+from nhl.features.league_constants import LeagueConstantsStore, fit_league_constants
 from nhl.features.priors import RosterSlot
 from nhl.ledger.predictions import PredictionStore
 from nhl.pipeline import run_slate
@@ -52,17 +53,30 @@ def run_walk_forward(
     cfg: BacktestConfig,
     predictions: PredictionStore,
     progress: bool = False,
+    constants_store: LeagueConstantsStore | None = None,
 ) -> dict:
     n_sims = cfg.n_sims or int(load("simulator")["backtest_n_sims"])
+    # Constants for the season come only from seasons completed before it (gap 3B).
+    constants = fit_league_constants(store, cfg.season)
+    constants_path = str(constants_store.save(constants)) if constants_store else ""
+    # Slate days from EVERY schedule version (a game rescheduled later still belongs to
+    # its originally announced day as known then); run_slate re-reads the schedule as
+    # known at as_of and skips postponed / not-yet-known games.
     season_games = [g for g in store.games if g.season == cfg.season]
-    summary = {"days": 0, "games_priced": 0, "games_skipped": 0, "artifacts": 0, "skipped_identical": 0, "errors": []}
+    summary = {"days": 0, "games_priced": 0, "games_skipped": 0, "artifacts": 0, "skipped_identical": 0,
+               "errors": [], "skipped_status": [], "constants_id": constants.constants_id, "constants_path": constants_path,
+               "constants_train_seasons": list(constants.train_seasons)}
     for day, games in slate_days(season_games).items():
         if day < cfg.start or day > cfg.end:
             continue
         as_of: datetime = min(g.start_time for g in games) - timedelta(minutes=cfg.lead_minutes)
-        run = run_slate(store, rosters, cfg.season, games, as_of, PredictionMode.BACKTEST, n_sims=n_sims, seed=str(cfg.seed))
+        on_day = {g.game_id: g for g in games}
+        known_today = [g for g in store.view(as_of).games() if g.game_id in on_day and g.start_time.astimezone(ET).date() == day]
+        run = run_slate(store, rosters, cfg.season, known_today, as_of, PredictionMode.BACKTEST, n_sims=n_sims,
+                        seed=str(cfg.seed), constants=constants)
         priced, errors, artifacts = run.priced, run.errors, run.artifacts
         summary["errors"].extend(f"{day}:{gid}:{msg}" for gid, msg in errors)
+        summary["skipped_status"].extend(f"{day}:{gid}:{why}" for gid, why in (run.skipped or []))
         res = predictions.append(artifacts)
         summary["days"] += 1
         summary["games_priced"] += len(priced)

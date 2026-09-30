@@ -49,10 +49,13 @@ def price_slate(
     n_sims: int | None = None,
     seed: int | None = None,
     min_goalie_p: float = 0.03,
+    sim_cfg: dict | None = None,
 ) -> tuple[list[PricedGame], list[tuple[str, str]]]:
-    """Returns priced games and (game_id, error) for games that could not be priced."""
+    """Returns priced games and (game_id, error) for games that could not be priced.
 
-    cfg = load("simulator")
+    ``sim_cfg``: simulator config with walk-forward league constants applied."""
+
+    cfg = sim_cfg or load("simulator")
     n_sims = n_sims or int(cfg["n_sims"])
     sched = team_schedule_features(view.games())
     scenarios: list[GameRates] = []
