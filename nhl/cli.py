@@ -311,10 +311,11 @@ def cmd_forward_drill(a):
         store.goalie_reports[:] = [r for r in s.goalie_reports if r.game_id not in ids] + [r for r in later if r.available_at <= t["now"]]
         log.append(runner.price(day, 2025))
     # A scratch arrives late for one team: explicit state change -> reprice.
-    g0 = sorted(games, key=lambda g: g.game_id)[0]
-    starter = next((r.goalie_id for r in later if r.game_id == g0.game_id and r.team == g0.home), None)
-    if starter:
-        store.goalie_reports.append(GoalieReport(g0.game_id, g0.home, starter, GoalieState.SCRATCHED, "team", first - timedelta(minutes=50)))
+    named = sorted((r for r in later if r.state is GoalieState.CONFIRMED), key=lambda r: (r.game_id, r.team))
+    if named:
+        r0 = named[0]
+        store.goalie_reports.append(GoalieReport(r0.game_id, r0.team, r0.goalie_id, GoalieState.SCRATCHED, "team",
+                                                 first - timedelta(minutes=50)))
         t["now"] = first - timedelta(minutes=40)
         log.append(runner.price(day, 2025))
     first_row = next(runner.predictions.rows())
