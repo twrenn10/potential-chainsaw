@@ -24,7 +24,8 @@ from nhl.timeutil import fmt_ts
 
 
 def all_config_hash() -> str:
-    return stable_digest([config_hash(n) for n in ("simulator", "goalie_start", "governance", "validation_gates")])
+    return stable_digest([config_hash(n) for n in ("simulator", "goalie_start", "governance", "validation_gates",
+                                                     "backfill_overrides", "moneypuck_vintages")])
 
 
 def data_snapshot_id(view: PointInTimeView, odds_used: list[OddsSnapshot]) -> str:
