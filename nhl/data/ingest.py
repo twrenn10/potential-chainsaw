@@ -190,8 +190,16 @@ def replay(
                 continue
             e = pbp_entries[gid]
             store.team_stats.extend(team_game_stats_from_pbp(xg_model, evs, g.start_time, g.home, g.away, e.snapshot_id, e.fetched_at))
+    schedule_seasons = {g.season for g in store.games}
+    needed_moneypuck_seasons = frozenset(schedule_seasons | {s - 1 for s in schedule_seasons}) or None
     for e in (e for e in entries if e.source == "moneypuck" and e.key.startswith("teams")):
-        res = moneypuck.parse_team_games_checked(raw.get_bytes(e), e, vintage_attestations)
+        try:
+            res = moneypuck.parse_team_games_checked(raw.get_bytes(e), e, vintage_attestations,
+                                                      seasons=needed_moneypuck_seasons)
+        except (moneypuck.SchemaError, UnicodeDecodeError, csv.Error) as exc:
+            rep.rejections.append(Rejection("moneypuck_teams", e.key, f"dataset schema mismatch: {exc}"))
+            rep.counts["moneypuck_teams.rejected"] += 1
+            continue
         rep.absorb("moneypuck_teams", res)
         store.team_stats.extend(res.records)
     rep.note("team_stats", store.team_stats)
@@ -222,4 +230,3 @@ def replay_rosters(raw: RawSnapshotStore) -> dict[int, list]:
         _, team, season = e.key.split("/")
         out[int(season)].extend(parse_roster_checked(raw.get_json(e), team, int(season), e).records)
     return dict(out)
-

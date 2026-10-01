@@ -159,4 +159,21 @@ class ForwardRunner:
         season_rosters = [s for v in rosters.values() for s in v]
         fresh = freshness_rows(store.view(now), ids, season_rosters, max_odds_age_min)
         matchups = {gid: f"{g.away}@{g.home}" for gid, g in latest.items()}
-        return export_reports(out_dir, rows, settle_predictions(store, rows), matchups, fresh, self.overrides.rows(), set(ids))
+        quality = []
+        if isinstance(self.state, ReplayStateSource):
+            from nhl.data.live_quality import source_quality_rows
+            from nhl.data.snapshots import RawSnapshotStore
+
+            quality = source_quality_rows(RawSnapshotStore(self.state.raw_root), now)
+        paths = export_reports(out_dir, rows, settle_predictions(store, rows), matchups, fresh,
+                               self.overrides.rows(), set(ids), quality)
+        from nhl.forward.evidence import build_forward_cohort, first_slate_audit
+
+        out = Path(out_dir)
+        cohort = build_forward_cohort(rows)
+        (out / "FORWARD_EVIDENCE.json").write_text(json.dumps(cohort, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (out / "FIRST_SLATE_AUDIT.json").write_text(
+            json.dumps(first_slate_audit(rows), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        paths["forward_evidence"] = str(out / "FORWARD_EVIDENCE.json")
+        paths["first_slate_audit"] = str(out / "FIRST_SLATE_AUDIT.json")
+        return paths

@@ -1,0 +1,5 @@
+source,last_successful_fetch,error_status,completeness,provenance_eligibility,rejected_records,anomaly_count,notes
+nhl_api,2026-10-01T03:13:33Z,OK,AVAILABLE,LIVE_CAPTURE,0,0,"47 schedule versions; 2 final PBP; 2 boxscores"
+moneypuck,2026-10-01T03:26:45Z,OK,AVAILABLE,"40 CONTEMPORANEOUS; historical blocked",3,0,"2 zero-TOI rows; 1 aggregate schema mismatch"
+odds,,NEVER,MISSING,INELIGIBLE,0,0,"THE_ODDS_API_KEY/ODDS_API_KEY not configured"
+goalie_reports,,NEVER,MISSING,INELIGIBLE,0,0,"No authorized timestamped pregame provider"

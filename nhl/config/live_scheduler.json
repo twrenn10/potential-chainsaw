@@ -1,0 +1,8 @@
+{
+  "morning_hours_before_first": 9,
+  "pregame_start_hours_before": 6,
+  "pregame_minutes": 60,
+  "near_close_window_minutes": 120,
+  "near_close_minutes": 15,
+  "postgame_hours_after_last": 4
+}

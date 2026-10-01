@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import csv
 import io
+import urllib.error
+import urllib.request
 from collections import Counter, defaultdict
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -32,6 +34,7 @@ from nhl.contracts.ids import canonical_game_id, canonical_player_id, canonical_
 from . import provenance as prov
 from .snapshots import RawSnapshotStore, SnapshotEntry
 from .validation import FieldError, ParseResult, strict_float, strict_int
+from nhl.timeutil import utcnow
 
 SOURCE = "moneypuck"
 TEAM_REQUIRED = (
@@ -49,6 +52,48 @@ class SchemaError(ValueError):
 
 SITUATIONS = {"5on5", "5on4", "4on5", "all", "other"}
 SUMMARY_CAPTURE_GRACE = timedelta(days=92)  # July 1 -> Oct 1: captured before the next season
+DOWNLOAD_BASE = "https://moneypuck.com/moneypuck/playerData/seasonSummary"
+
+
+class MoneyPuckClient:
+    """Small allow-listed downloader that always stores source bytes before parsing."""
+
+    def __init__(self, store: RawSnapshotStore, timeout: float = 30.0) -> None:
+        self.store = store
+        self.timeout = timeout
+
+    def fetch(self, season: int, kind: str = "team_games", phase: str = "regular",
+              fetched_at: datetime | None = None) -> SnapshotEntry:
+        if kind not in {"team_games", "team_summary", "goalie_summary", "skater_summary"}:
+            raise ValueError("unsupported MoneyPuck dataset kind")
+        if phase not in {"regular", "playoffs"}:
+            raise ValueError("phase must be regular or playoffs")
+        if kind == "team_games":
+            key = "teams/game_by_game/all_seasons"
+            url = "https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv"
+        else:
+            filename = {"team_summary": "teams", "goalie_summary": "goalies", "skater_summary": "skaters"}[kind]
+            key = f"summary/{filename}/{season}/{phase}"
+            url = f"{DOWNLOAD_BASE}/{season}/{phase}/{filename}.csv"
+        at = fetched_at or utcnow()
+        req = urllib.request.Request(url, headers={"User-Agent": "nhl-desk/0.1"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:  # noqa: S310 - fixed host
+                payload = response.read()
+                headers = {k.lower(): v for k, v in response.headers.items() if k.lower() in {
+                    "content-type", "etag", "last-modified", "content-length", "date"
+                }}
+                return self.store.put(SOURCE, key, payload, at, {
+                    "url": url, "http_status": int(getattr(response, "status", 200)),
+                    "response_headers": headers,
+                })
+        except urllib.error.HTTPError as exc:
+            self.store.record_failure(SOURCE, key, at, "HTTP_ERROR", str(exc.reason), status=exc.code,
+                                      retryable=exc.code >= 500 or exc.code == 429)
+            raise
+        except (urllib.error.URLError, TimeoutError) as exc:
+            self.store.record_failure(SOURCE, key, at, "TRANSPORT_ERROR", str(exc), retryable=True)
+            raise
 
 
 def game_row_available_at(game_date: str) -> datetime:
@@ -115,9 +160,17 @@ def parse_team_games_checked(
     entry: SnapshotEntry | None = None,
     attestations: list[dict] | None = None,
     situations: tuple[str, ...] = ("5on5", "5on4", "4on5", "all"),
+    seasons: frozenset[int] | None = None,
 ) -> ParseResult[TeamGameStats]:
     out: ParseResult[TeamGameStats] = ParseResult()
     for i, r in enumerate(_reader(payload, TEAM_REQUIRED)):
+        if seasons is not None:
+            try:
+                row_season = int(str(r.get("season") or r.get("gameId") or "")[:4])
+            except ValueError:
+                row_season = -1
+            if row_season not in seasons:
+                continue
         key = f"{r.get('gameId')}:{r.get('playerTeam')}:{r.get('situation')}"
         try:
             if r["situation"] not in SITUATIONS:
@@ -160,8 +213,9 @@ def parse_team_games_checked(
 
 
 def parse_team_games(payload: bytes, situations: tuple[str, ...] = ("5on5", "5on4", "4on5", "all"),
-                     entry: SnapshotEntry | None = None, attestations: list[dict] | None = None) -> list[TeamGameStats]:
-    return parse_team_games_checked(payload, entry, attestations, situations).require_clean()
+                     entry: SnapshotEntry | None = None, attestations: list[dict] | None = None,
+                     seasons: frozenset[int] | None = None) -> list[TeamGameStats]:
+    return parse_team_games_checked(payload, entry, attestations, situations, seasons).require_clean()
 
 
 def parse_goalie_games_checked(

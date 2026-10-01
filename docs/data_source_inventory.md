@@ -1,6 +1,6 @@
 # Data-source inventory
 
-Status key: **parser implemented · fixture-validated · live validation BLOCKED** applies to every NHL API / MoneyPuck row below. No live payload has been captured from this environment.
+Phase 3 update (2026-10-01 UTC): NHL API and MoneyPuck live capture succeeded. Odds and pregame goalie reports remain externally blocked. Raw live snapshots are kept in the ignored capture store; see `live_source_validation.md`.
 
 | Source | What | Access | Grain / timestamp | Status in repo |
 |---|---|---|---|---|
@@ -10,10 +10,10 @@ Status key: **parser implemented · fixture-validated · live validation BLOCKED
 | NHL stats API `api.nhle.com/stats/rest/en/shiftcharts` | Shifts, for line/TOI context | Public, undocumented | Shift | Client + parser (not yet used in features) |
 | NHL API `.../roster/{TEAM}/{SEASON}` | Roster snapshot for priors | Public, undocumented | Capture time (live only) | Client + checked parser (Phase 2) |
 | In-house xG (`nhl/features/xg.py`) | Walk-forward xG from play-by-play | Derived | puck drop + 4h; model trained on prior seasons | Implemented; causal replacement for backfilled MoneyPuck xG |
-| MoneyPuck team game-by-game CSV | 5on5 / 5on4 / all: xG, goals, SOG, penalties, TOI | Free download (check terms) | Team-game-situation; next day 12:00 UTC | Parser + schema check; **verify `penaltiesFor` semantics** |
+| MoneyPuck all-teams game-by-game CSV | 5on5 / 5on4 / all: xG, goals, SOG, penalties, TOI | Listed public download; non-commercial terms + attribution | Team-game-situation; next day 12:00 UTC plus vintage rule | Live-captured and parsed; two impossible zero-TOI rows rejected. `seasonSummary/.../teams.csv` is explicitly not this dataset |
 | MoneyPuck goalie game-by-game CSV | xGA, GA, shots on goal, TOI | Free download | Goalie-game; next day | Parser (starter inferred by TOI, flagged) |
 | MoneyPuck skater season CSV | 5v5 on-ice xGF/xGA for player priors | Free download | Player-season; July 1 after season | Parser |
-| Odds feed (vendor TBD) | ML, 3-way, puck line, totals, team totals, goalie saves, player SOG by book, with limits | **Paid (needed; none configured)** | provider `source_ts` ≤ `observed_at` ≤ fetch | Market-v2 contract + provider interface (`nhl/market/providers.py`), parser, no-vig, close-v1, close store, replay. Fixture-only |
+| The Odds API / market-v2 feed | ML, 3-way, puck line, totals, team totals and research props by book | Paid credential; none configured | provider `source_ts` ≤ `observed_at` ≤ fetch | Raw+normalized adapter implemented; live capture blocked on API key |
 | Goalie confirmations (DailyFaceoff, beat reporters, or vendor) | Starter state (CONFIRMED/EXPECTED/PROBABLE/PROJECTED/SCRATCHED) with publication time and optional confidence | Scrape or paid; **check ToS**; none configured | Publication timestamp | Checked parser, provenance, lineage and conflict handling, provider interface. Fixture-only |
 | Line combinations / lineups | Lineup state | TBD | Timestamp | Not implemented (`lineup_state=UNKNOWN`) |
 
@@ -23,4 +23,4 @@ All parsers have `*_checked` variants that return records, per-record rejections
 **These checks have only been exercised against source-format fixtures. No live payload has been validated. The field names flagged VERIFY must be confirmed against live data.**
 
 ## Network note
-As of 2026-09-30 this build environment's network policy still denies `api-web.nhle.com`, `api.nhle.com`, `moneypuck.com` and `peter-tanner.com` (`nhl capture` gets `403 Forbidden` from the egress proxy). Ingestion is therefore tested against recorded-format fixtures in `tests/fixtures/`, and the end-to-end run uses the synthetic league. To run live ingestion, allow these hosts in the environment's network settings, or run the code on a machine with open access.
+The earlier 403 network blocker is resolved for `api-web.nhle.com` and listed `moneypuck.com` downloads. Live odds and goalie capture require provider access not present in this environment.

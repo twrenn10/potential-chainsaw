@@ -8,3 +8,4 @@ dist/
 # Generated stores and outputs (never hand-edit; regenerate from raw snapshots)
 store/
 out/
+phase3_live/

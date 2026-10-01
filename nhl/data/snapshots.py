@@ -59,6 +59,7 @@ class RawSnapshotStore:
         self.root = Path(root)
         self.blob_dir = self.root / "raw" / "blobs"
         self.manifest_path = self.root / "raw" / "manifest.jsonl"
+        self.failure_path = self.root / "raw" / "fetch_failures.jsonl"
         self.blob_dir.mkdir(parents=True, exist_ok=True)
 
     def _blob_path(self, digest: str) -> Path:
@@ -95,6 +96,43 @@ class RawSnapshotStore:
         with self.manifest_path.open("a", encoding="utf-8") as handle:
             handle.write(entry.to_json() + "\n")
         return entry
+
+    def record_failure(
+        self,
+        source: str,
+        key: str,
+        attempted_at: str | datetime,
+        error_class: str,
+        detail: str,
+        *,
+        status: int | None = None,
+        retryable: bool = False,
+    ) -> None:
+        """Append a sanitized fetch failure without disturbing valid snapshots.
+
+        URLs and credentials intentionally do not belong here.  A failed refresh is
+        an observation in its own right and must never be represented as "no change".
+        """
+
+        row = {
+            "source": source,
+            "key": key,
+            "attempted_at": fmt_ts(parse_ts(attempted_at)),
+            "error_class": error_class,
+            "detail": str(detail)[:500],
+            "status": status,
+            "retryable": bool(retryable),
+        }
+        self.failure_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.failure_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+
+    def failures(self) -> Iterator[dict[str, Any]]:
+        if not self.failure_path.exists():
+            return
+        with self.failure_path.open(encoding="utf-8") as handle:
+            for line in handle:
+                yield json.loads(line)
 
     def get_bytes(self, entry: SnapshotEntry) -> bytes:
         payload = gzip.decompress(self._blob_path(entry.sha256).read_bytes())

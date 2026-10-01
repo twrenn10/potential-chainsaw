@@ -102,6 +102,38 @@ def cmd_capture_rosters(a):
     return _print([c.fetch_roster(t.strip(), a.season).key for t in a.teams.split(",") if t.strip()])
 
 
+def cmd_capture_moneypuck(a):
+    from nhl.data.moneypuck import MoneyPuckClient
+    from nhl.data.snapshots import RawSnapshotStore
+
+    e = MoneyPuckClient(RawSnapshotStore(a.store)).fetch(a.season, a.kind, a.phase)
+    return _print({"snapshot_id": e.snapshot_id, "key": e.key, "fetched_at": e.fetched_at,
+                   "sha256": e.sha256, "n_bytes": e.n_bytes})
+
+
+def cmd_capture_live_odds(a):
+    from nhl.data.snapshots import RawSnapshotStore
+    from nhl.market.providers import TheOddsApiProvider, capture_live_odds
+
+    event_map = json.loads(Path(a.event_map).read_text(encoding="utf-8"))
+    original, normalized, rejected = capture_live_odds(
+        TheOddsApiProvider(regions=a.regions), RawSnapshotStore(a.store), date.fromisoformat(a.date), event_map)
+    return _print({"raw_snapshot_id": original.snapshot_id, "normalized_snapshot_id": normalized.snapshot_id,
+                   "normalization_rejections": rejected})
+
+
+def cmd_scheduler_plan(a):
+    from nhl.config import load
+    from nhl.data.ingest import replay
+    from nhl.data.snapshots import RawSnapshotStore
+    from nhl.forward.scheduler import build_plan
+
+    day = date.fromisoformat(a.date)
+    store, _ = replay(RawSnapshotStore(a.store), data_origin="LIVE")
+    drops = [g.start_time for g in store.latest_games().values() if g.start_time.astimezone().date() == day]
+    return _print([{"due_at": x.due_at, "action": x.action, "reason": x.reason} for x in build_plan(drops, load("live_scheduler"))])
+
+
 def cmd_capture_provider(a, kind: str):
     from nhl.data.snapshots import RawSnapshotStore
     from nhl.market.providers import FileProvider, capture_goalie_reports, capture_odds
@@ -357,6 +389,12 @@ def main(argv: list[str] | None = None) -> int:
     add("capture-data", cmd_capture_data, "fetch schedule + final pbp/boxscores (network)", date_, store)
     add("ingest-results", cmd_capture_data, "alias of capture-data", date_, store)
     add("capture-rosters", cmd_capture_rosters, "fetch roster snapshots (network)", (("--teams",), {"required": True}), season, store)
+    add("capture-moneypuck", cmd_capture_moneypuck, "fetch + store a MoneyPuck CSV (network)", season, store,
+        (("--kind",), {"choices": ["team_games", "team_summary", "goalie_summary", "skater_summary"],
+                         "default": "team_games"}),
+        (("--phase",), {"choices": ["regular", "playoffs"], "default": "regular"}))
+    add("capture-live-odds", cmd_capture_live_odds, "capture raw The Odds API JSON + normalized market-v2", date_, store,
+        (("--event-map",), {"required": True}), (("--regions",), {"default": "us"}))
     add("capture-goalies", lambda a: cmd_capture_provider(a, "goalies"), "store a goalie-report provider file", *provider, date_, store)
     add("capture-odds", lambda a: cmd_capture_provider(a, "odds"), "store an odds provider file (market-v2)", *provider, date_, store)
     add("replay", cmd_replay, "rebuild a provenanced store + ingest report", store, out)
@@ -372,6 +410,7 @@ def main(argv: list[str] | None = None) -> int:
     add("evaluate-gates", cmd_evaluate_gates, "market-by-market evaluation + gates (FORWARD)", fwd, store, out, *sim,
         (("--bootstrap",), {"type": int, "default": 300}))
     add("export-desk", cmd_export_desk, "deterministic desk reports", fwd, store, out, *sim, (("--date",), {"default": None}))
+    add("scheduler-plan", cmd_scheduler_plan, "show configured live orchestration plan", date_, store)
     bt = [(("--synthetic",), {"action": "store_true"}), (("--out",), {"default": "out/demo"}),
           (("--start",), {"default": "2025-10-20"}), (("--end",), {"default": "2026-04-15"}),
           (("--desk-date",), {"default": "2026-01-20"}), (("--n-sims",), {"type": int, "default": 3000}),

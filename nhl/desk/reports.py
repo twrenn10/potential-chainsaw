@@ -46,6 +46,8 @@ GRADING_COLUMNS = ["prediction_id", "game_id", "market", "selection", "line", "t
 GOV_COLUMNS = ["prediction_id", "game_id", "market_key", "sportsbook", "as_of", "evidence_lane", "status",
                "effective_status", "eligibility", "shadow_lane", "block_reasons", "reason_codes", "overrides"]
 FRESH_COLUMNS = ["game_id", "category", "status", "latest_available_at", "age_minutes", "detail"]
+SOURCE_QUALITY_COLUMNS = ["source", "last_successful_fetch", "age_minutes", "error_status", "completeness",
+                          "provenance_eligibility", "stale_threshold_minutes", "stale", "rejected_records", "anomaly_count"]
 
 
 def _fmt(v: Any) -> Any:
@@ -141,6 +143,7 @@ def export_reports(
     freshness: list[dict[str, Any]],
     overrides: list[dict[str, Any]] | None = None,
     slate_game_ids: set[str] | None = None,
+    source_quality: list[dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -156,6 +159,7 @@ def export_reports(
         "GRADING_REPORT.csv": (settled, GRADING_COLUMNS),
         "GOVERNANCE_REPORT.csv": (governance_rows(prediction_rows, ov), GOV_COLUMNS),
         "DATA_FRESHNESS.csv": (sorted(freshness, key=lambda r: (r["game_id"], r["category"])), FRESH_COLUMNS),
+        "LIVE_SOURCE_QUALITY.csv": (sorted(source_quality or [], key=lambda r: r["source"]), SOURCE_QUALITY_COLUMNS),
     }
     counts, paths = {}, {}
     for name, (rows, cols) in files.items():

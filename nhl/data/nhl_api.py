@@ -23,9 +23,11 @@ and attaches ``Provenance`` built by ``nhl.data.provenance`` rules:
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any, Callable, Union
 
 from nhl.contracts import Game, GameResult, GoalieGameStats, RosterSlot, canonical_team
 from nhl.contracts.ids import canonical_game_id, canonical_player_id, game_type_of
@@ -41,13 +43,23 @@ RESULT_LAG = timedelta(hours=4)
 SOURCE = "nhl_api"
 SOURCE_VERSION = "api-web/v1"
 
-Transport = Callable[[str], bytes]
+@dataclass(frozen=True)
+class HttpPayload:
+    body: bytes
+    status: int
+    headers: dict[str, str]
 
 
-def http_transport(url: str, timeout: float = 30.0) -> bytes:
+Transport = Callable[[str], Union[bytes, HttpPayload]]
+
+
+def http_transport(url: str, timeout: float = 30.0) -> HttpPayload:
     req = urllib.request.Request(url, headers={"User-Agent": "nhl-desk/0.1"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed hosts
-        return resp.read()
+        useful = {k.lower(): v for k, v in resp.headers.items() if k.lower() in {
+            "content-type", "etag", "last-modified", "cache-control", "date"
+        }}
+        return HttpPayload(resp.read(), int(getattr(resp, "status", 200)), useful)
 
 
 class NHLApiClient:
@@ -56,9 +68,30 @@ class NHLApiClient:
         self.transport = transport
 
     def _fetch(self, key: str, url: str, fetched_at: datetime | None = None) -> SnapshotEntry:
-        payload = self.transport(url)
-        json.loads(payload)  # reject non-JSON before it lands in the store
-        return self.store.put(SOURCE, key, payload, fetched_at or utcnow(), {"url": url})
+        at = fetched_at or utcnow()
+        try:
+            response = self.transport(url)
+            if isinstance(response, HttpPayload):
+                payload, status, headers = response.body, response.status, response.headers
+            else:  # injectable legacy/test transports
+                payload, status, headers = response, 200, {}
+            entry = self.store.put(SOURCE, key, payload, at, {
+                "url": url, "http_status": status, "response_headers": headers,
+            })
+            # Store first. Malformed live responses remain auditable and replay rejects them.
+            try:
+                json.loads(payload)
+            except json.JSONDecodeError as exc:
+                self.store.record_failure(SOURCE, key, at, "MALFORMED_PAYLOAD", str(exc), status=status)
+                raise
+            return entry
+        except urllib.error.HTTPError as exc:
+            self.store.record_failure(SOURCE, key, at, "HTTP_ERROR", str(exc.reason),
+                                      status=exc.code, retryable=exc.code >= 500 or exc.code == 429)
+            raise
+        except (urllib.error.URLError, TimeoutError) as exc:
+            self.store.record_failure(SOURCE, key, at, "TRANSPORT_ERROR", str(exc), retryable=True)
+            raise
 
     def fetch_schedule(self, date: str, fetched_at: datetime | None = None) -> SnapshotEntry:
         return self._fetch(f"schedule/{date}", f"{WEB_BASE}/schedule/{date}", fetched_at)
