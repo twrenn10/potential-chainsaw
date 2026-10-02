@@ -1,9 +1,13 @@
 import json
+import io
+import zipfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
 from nhl.data.ingest import replay
+from nhl.data.moneypuck import _combine_csv_zip
 from nhl.data.live_quality import source_quality_rows
 from nhl.data.nhl_api import HttpPayload, NHLApiClient
 from nhl.data.odds import parse_market_observations_checked
@@ -49,6 +53,20 @@ def test_moneypuck_wrong_dataset_is_structured_rejection(tmp_path):
     store, report = replay(raw)
     assert not store.team_stats
     assert any("schema mismatch" in r.reason for r in report.rejections)
+
+
+def test_goalie_archive_is_preserved_then_replayed(tmp_path):
+    payload = (Path(__file__).parent / "fixtures" / "moneypuck_goalies.csv").read_bytes()
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("one.csv", payload)
+    combined = _combine_csv_zip(archive.getvalue())
+    assert combined == payload
+    raw = RawSnapshotStore(tmp_path)
+    raw.put("moneypuck_raw", "goalies/2025/regular.zip", archive.getvalue(), NOW)
+    raw.put("moneypuck", "goalies/2025/regular", combined, NOW)
+    store, report = replay(raw)
+    assert store.goalie_stats and report.counts["moneypuck_goalie_games"] == len(store.goalie_stats)
 
 
 def test_odds_adapter_normalizes_provider_timestamps_and_ids(tmp_path):

@@ -390,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
     add("ingest-results", cmd_capture_data, "alias of capture-data", date_, store)
     add("capture-rosters", cmd_capture_rosters, "fetch roster snapshots (network)", (("--teams",), {"required": True}), season, store)
     add("capture-moneypuck", cmd_capture_moneypuck, "fetch + store a MoneyPuck CSV (network)", season, store,
-        (("--kind",), {"choices": ["team_games", "team_summary", "goalie_summary", "skater_summary"],
+        (("--kind",), {"choices": ["team_games", "goalie_games", "team_summary", "goalie_summary", "skater_summary"],
                          "default": "team_games"}),
         (("--phase",), {"choices": ["regular", "playoffs"], "default": "regular"}))
     add("capture-live-odds", cmd_capture_live_odds, "capture raw The Odds API JSON + normalized market-v2", date_, store,

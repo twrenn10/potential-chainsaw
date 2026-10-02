@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import io
+import zipfile
 import urllib.error
 import urllib.request
 from collections import Counter, defaultdict
@@ -64,13 +65,16 @@ class MoneyPuckClient:
 
     def fetch(self, season: int, kind: str = "team_games", phase: str = "regular",
               fetched_at: datetime | None = None) -> SnapshotEntry:
-        if kind not in {"team_games", "team_summary", "goalie_summary", "skater_summary"}:
+        if kind not in {"team_games", "goalie_games", "team_summary", "goalie_summary", "skater_summary"}:
             raise ValueError("unsupported MoneyPuck dataset kind")
         if phase not in {"regular", "playoffs"}:
             raise ValueError("phase must be regular or playoffs")
         if kind == "team_games":
             key = "teams/game_by_game/all_seasons"
             url = "https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv"
+        elif kind == "goalie_games":
+            key = f"goalies/{season}/{phase}"
+            url = f"https://peter-tanner.com/moneypuck/downloads/seasonPlayersSummary/goalies/{season}.zip"
         else:
             filename = {"team_summary": "teams", "goalie_summary": "goalies", "skater_summary": "skaters"}[kind]
             key = f"summary/{filename}/{season}/{phase}"
@@ -83,9 +87,21 @@ class MoneyPuckClient:
                 headers = {k.lower(): v for k, v in response.headers.items() if k.lower() in {
                     "content-type", "etag", "last-modified", "content-length", "date"
                 }}
-                return self.store.put(SOURCE, key, payload, at, {
+                meta = {
                     "url": url, "http_status": int(getattr(response, "status", 200)),
                     "response_headers": headers,
+                }
+                if kind != "goalie_games":
+                    return self.store.put(SOURCE, key, payload, at, meta)
+                raw_entry = self.store.put("moneypuck_raw", key + ".zip", payload, at, meta)
+                try:
+                    combined = _combine_csv_zip(payload)
+                except (zipfile.BadZipFile, SchemaError, UnicodeDecodeError) as exc:
+                    self.store.record_failure(SOURCE, key, at, "MALFORMED_PAYLOAD", str(exc),
+                                              status=meta["http_status"])
+                    raise
+                return self.store.put(SOURCE, key, combined, at, {
+                    **meta, "derived_from": raw_entry.snapshot_id, "archive_sha256": raw_entry.sha256,
                 })
         except urllib.error.HTTPError as exc:
             self.store.record_failure(SOURCE, key, at, "HTTP_ERROR", str(exc.reason), status=exc.code,
@@ -94,6 +110,30 @@ class MoneyPuckClient:
         except (urllib.error.URLError, TimeoutError) as exc:
             self.store.record_failure(SOURCE, key, at, "TRANSPORT_ERROR", str(exc), retryable=True)
             raise
+
+
+def _combine_csv_zip(payload: bytes) -> bytes:
+    """Combine same-schema CSV members after the untouched ZIP is safely stored."""
+
+    chunks: list[bytes] = []
+    header: bytes | None = None
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        members = sorted(n for n in archive.namelist() if n.lower().endswith(".csv") and not n.startswith("__MACOSX/"))
+        if not members:
+            raise SchemaError("goalie archive contains no CSV files")
+        for name in members:
+            data = archive.read(name).replace(b"\r\n", b"\n")
+            lines = data.splitlines()
+            if not lines:
+                continue
+            if header is None:
+                header = lines[0]
+                chunks.append(header + b"\n")
+            elif lines[0] != header:
+                raise SchemaError(f"goalie archive member {name} has a different header")
+            if len(lines) > 1:
+                chunks.append(b"\n".join(lines[1:]) + b"\n")
+    return b"".join(chunks)
 
 
 def game_row_available_at(game_date: str) -> datetime:

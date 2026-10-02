@@ -204,6 +204,23 @@ def replay(
         store.team_stats.extend(res.records)
     rep.note("team_stats", store.team_stats)
 
+    mp_goalies = []
+    for e in (e for e in entries if e.source == "moneypuck" and e.key.startswith("goalies/")):
+        try:
+            res = moneypuck.parse_goalie_games_checked(raw.get_bytes(e), e, vintage_attestations)
+        except (moneypuck.SchemaError, UnicodeDecodeError, csv.Error) as exc:
+            rep.rejections.append(Rejection("moneypuck_goalies", e.key, f"dataset schema mismatch: {exc}"))
+            rep.counts["moneypuck_goalies.rejected"] += 1
+            continue
+        rep.absorb("moneypuck_goalies", res)
+        mp_goalies.extend(res.records)
+    if mp_goalies:
+        box_keys = {(g.game_id, g.goalie_id) for g in mp_goalies}
+        merged = moneypuck.merge_goalie_sources(mp_goalies, store.goalie_stats)
+        merged.extend(g for g in store.goalie_stats if (g.game_id, g.goalie_id) not in box_keys)
+        store.goalie_stats = sorted(merged, key=lambda g: (g.game_id, g.team, g.goalie_id))
+    rep.note("moneypuck_goalie_games", mp_goalies)
+
     for e in (e for e in entries if e.source == "odds"):
         payload = raw.get_bytes(e)
         res = parse_market_observations_checked(payload, e) if is_market_v2(payload) else parse_odds_checked(payload, e)
