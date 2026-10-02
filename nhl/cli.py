@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import sys
 import time
@@ -138,10 +139,67 @@ def cmd_capture_provider(a, kind: str):
     from nhl.data.snapshots import RawSnapshotStore
     from nhl.market.providers import FileProvider, capture_goalie_reports, capture_odds
 
+    if kind == "odds" and a.provider == "owls":
+        from nhl.data.ingest import replay
+        from nhl.market.owls import OwlsInsightClient, capture_and_normalize_live
+
+        raw = RawSnapshotStore(a.store)
+        state, _ = replay(raw, data_origin="LIVE")
+        verified = set()
+        if a.settlement_file:
+            rows = json.loads(Path(a.settlement_file).read_text(encoding="utf-8"))
+            verified = {(str(x["book"]).lower(), str(x["market"])) for x in rows if x.get("verified") is True}
+        original, derived, rejected = capture_and_normalize_live(
+            OwlsInsightClient(raw), list(state.latest_games().values()), verified)
+        from collections import Counter
+        counts = Counter(reason.split(":", 1)[0] for reason in rejected)
+        return _print({"raw_snapshot_id": original.snapshot_id, "normalized_snapshot_id": derived.snapshot_id,
+                       "normalization_rejection_counts": dict(sorted(counts.items())),
+                       "normalization_rejection_examples": rejected[:20]})
+    if not a.provider_dir:
+        raise SystemExit("--provider-dir is required for file providers")
     prov = FileProvider(a.provider, a.provider_dir)
     fn = capture_odds if kind == "odds" else capture_goalie_reports
     e = fn(prov, RawSnapshotStore(a.store), date.fromisoformat(a.date))
     return _print({"snapshot_id": e.snapshot_id, "key": e.key, "fetched_at": e.fetched_at})
+
+
+def cmd_capture_owls_history(a):
+    from nhl.data.snapshots import RawSnapshotStore
+    from nhl.market.owls import OwlsInsightClient
+
+    client = OwlsInsightClient(RawSnapshotStore(a.store))
+    entries = [client.capture("/api/v1/history/closing-odds", {
+        "sport": "nhl", "startDate": a.date, "endDate": a.date, "limit": 500,
+    })]
+    supplied = [a.event_id, a.book, a.market, a.side]
+    if any(supplied) and not all(supplied):
+        raise SystemExit("--event-id, --book, --market and --side must be supplied together")
+    if all(supplied):
+        entries.append(client.capture("/api/odds/history", {
+            "eventId": a.event_id, "book": a.book, "market": a.market, "side": a.side, "hours": a.hours,
+        }))
+    return _print([{"snapshot_id": e.snapshot_id, "key": e.key, "n_bytes": e.n_bytes} for e in entries])
+
+
+def cmd_record_goalie_report(a):
+    from nhl.data.snapshots import RawSnapshotStore
+
+    entered = utcnow()
+    if parse_ts(a.published_at) > entered:
+        raise SystemExit("--published-at cannot be in the future")
+    buf = io.StringIO()
+    cols = ["available_at", "game_id", "team", "goalie_id", "state", "source", "confidence", "entered_at"]
+    writer = csv.DictWriter(buf, fieldnames=cols, lineterminator="\n")
+    writer.writeheader()
+    writer.writerow({"available_at": a.published_at, "game_id": a.game_id, "team": a.team,
+                     "goalie_id": a.goalie_id, "state": a.state, "source": a.source,
+                     "confidence": "" if a.confidence is None else a.confidence,
+                     "entered_at": entered.strftime("%Y-%m-%dT%H:%M:%SZ")})
+    entry = RawSnapshotStore(a.store).put("goalie_reports", f"operator/{a.game_id}/{a.team}",
+                                          buf.getvalue().encode(), entered,
+                                          {"capture_mode": "LIVE", "operator_entry": True})
+    return _print({"snapshot_id": entry.snapshot_id, "key": entry.key, "fetched_at": entry.fetched_at})
 
 
 def cmd_replay(a):
@@ -383,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
     out = (("--out",), {"required": True})
     sim = [(("--simulated-clock",), {"action": "store_true"}), (("--at",), {"default": None}),
            (("--n-sims",), {"type": int, "default": None})]
-    provider = [(("--provider-dir",), {"required": True}), (("--provider",), {"required": True})]
+    provider = [(("--provider-dir",), {"default": None}), (("--provider",), {"required": True})]
 
     add("capture-schedule", cmd_capture_schedule, "fetch + store the schedule (network)", date_, store)
     add("capture-data", cmd_capture_data, "fetch schedule + final pbp/boxscores (network)", date_, store)
@@ -396,7 +454,19 @@ def main(argv: list[str] | None = None) -> int:
     add("capture-live-odds", cmd_capture_live_odds, "capture raw The Odds API JSON + normalized market-v2", date_, store,
         (("--event-map",), {"required": True}), (("--regions",), {"default": "us"}))
     add("capture-goalies", lambda a: cmd_capture_provider(a, "goalies"), "store a goalie-report provider file", *provider, date_, store)
-    add("capture-odds", lambda a: cmd_capture_provider(a, "odds"), "store an odds provider file (market-v2)", *provider, date_, store)
+    add("capture-odds", lambda a: cmd_capture_provider(a, "odds"), "capture Owls or store a provider file (market-v2)", *provider, date_, store,
+        (("--settlement-file",), {"default": None}))
+    add("capture-odds-history", cmd_capture_owls_history, "capture Owls close and optional line history", date_, store,
+        (("--provider",), {"choices": ["owls"], "default": "owls"}),
+        (("--event-id",), {"default": None}), (("--book",), {"default": None}),
+        (("--market",), {"default": None}), (("--side",), {"default": None}),
+        (("--hours",), {"type": int, "default": 168}))
+    add("record-goalie-report", cmd_record_goalie_report, "record a timestamped operator goalie report", store,
+        (("--game-id",), {"required": True}), (("--team",), {"required": True}),
+        (("--goalie-id",), {"required": True}),
+        (("--state",), {"required": True, "choices": ["CONFIRMED", "EXPECTED", "PROBABLE", "PROJECTED", "SCRATCHED"]}),
+        (("--source",), {"required": True}), (("--published-at",), {"required": True}),
+        (("--confidence",), {"type": float, "default": None}))
     add("replay", cmd_replay, "rebuild a provenanced store + ingest report", store, out)
     add("fit-params", cmd_fit_params, "fit + persist walk-forward league constants", store, season, out)
     add("price-slate", cmd_price_slate, "price not-started games at now (FORWARD)", fwd, store, date_, season, *sim,

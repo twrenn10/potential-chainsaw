@@ -1,0 +1,13 @@
+# Example only. Set absolute paths, environment and season for the deployment.
+# Required allowlist: api.owlsinsight.com (REST and default WebSocket host),
+# api-web.nhle.com, api.nhle.com, and moneypuck.com.
+SHELL=/bin/sh
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# Capture and price every 30 minutes. The scheduler/runner fails closed outside
+# the slate window and for missing inputs.
+*/30 * * * * cd /srv/nhl && . /etc/nhl/credentials.env && nhl capture-schedule --date "$(date +\%F)" --store var/store && nhl capture-odds --provider owls --date "$(date +\%F)" --store var/store && nhl price-slate --forward-root var/forward --store var/store --date "$(date +\%F)" --season 2026
+
+# Postgame lifecycle; close-v1 uses only observations captured before cutoff.
+15 4 * * * cd /srv/nhl && . /etc/nhl/credentials.env && nhl capture-close --forward-root var/forward --store var/store --date "$(date -d yesterday +\%F)"
+30 10 * * * cd /srv/nhl && . /etc/nhl/credentials.env && nhl ingest-results --date "$(date -d yesterday +\%F)" --store var/store && nhl grade --forward-root var/forward --store var/store --out var/reports && nhl clv --forward-root var/forward --store var/store --out var/reports && nhl verify --forward-root var/forward && nhl export-desk --forward-root var/forward --store var/store --date "$(date -d yesterday +\%F)" --out var/reports

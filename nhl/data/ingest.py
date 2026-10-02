@@ -222,6 +222,11 @@ def replay(
     rep.note("moneypuck_goalie_games", mp_goalies)
 
     for e in (e for e in entries if e.source == "odds"):
+        # Owls HTTP bodies are intentionally stored under source=odds. They are
+        # immutable capture evidence, not the derived market-v2 contract.
+        if e.meta.get("provider") == "owls" and e.meta.get("contract") != "market-v2":
+            rep.counts["odds.raw_owls"] += 1
+            continue
         payload = raw.get_bytes(e)
         res = parse_market_observations_checked(payload, e) if is_market_v2(payload) else parse_odds_checked(payload, e)
         rep.absorb("odds", res)

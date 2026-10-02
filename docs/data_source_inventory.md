@@ -1,6 +1,6 @@
 # Data-source inventory
 
-Phase 3 update (2026-10-01 UTC): NHL API and MoneyPuck live capture succeeded. Odds and pregame goalie reports remain externally blocked. Raw live snapshots are kept in the ignored capture store; see `live_source_validation.md`.
+Phase 3 update (2026-10-02 UTC): NHL API, MoneyPuck and Owls Insight live capture succeeded. Owls normalization remains fail-closed until sportsbook settlement conventions are attested; pregame goalie reports remain externally blocked. Raw live snapshots are kept in the ignored capture store; see `live_source_validation.md` and `owls_odds_mapping.md`.
 
 | Source | What | Access | Grain / timestamp | Status in repo |
 |---|---|---|---|---|
@@ -13,7 +13,7 @@ Phase 3 update (2026-10-01 UTC): NHL API and MoneyPuck live capture succeeded. O
 | MoneyPuck all-teams game-by-game CSV | 5on5 / 5on4 / all: xG, goals, SOG, penalties, TOI | Listed public download; non-commercial terms + attribution | Team-game-situation; next day 12:00 UTC plus vintage rule | Live-captured and parsed; two impossible zero-TOI rows rejected. `seasonSummary/.../teams.csv` is explicitly not this dataset |
 | MoneyPuck goalie game-by-game CSV | xGA, GA, shots on goal, TOI | Free download | Goalie-game; next day | Parser (starter inferred by TOI, flagged) |
 | MoneyPuck skater season CSV | 5v5 on-ice xGF/xGA for player priors | Free download | Player-season; July 1 after season | Parser |
-| The Odds API / market-v2 feed | ML, 3-way, puck line, totals, team totals and research props by book | Paid credential; none configured | provider `source_ts` ≤ `observed_at` ≤ fetch | Raw+normalized adapter implemented; live capture blocked on API key |
+| Owls Insight / market-v2 feed | Live NHL boards, history, provider closes and research props | Paid credential configured locally | provider `source_ts` ≤ `observed_at` ≤ fetch | Raw-first adapter and real schema capture implemented; settlement attestations still required |
 | Goalie confirmations (DailyFaceoff, beat reporters, or vendor) | Starter state (CONFIRMED/EXPECTED/PROBABLE/PROJECTED/SCRATCHED) with publication time and optional confidence | Scrape or paid; **check ToS**; none configured | Publication timestamp | Checked parser, provenance, lineage and conflict handling, provider interface. Fixture-only |
 | Line combinations / lineups | Lineup state | TBD | Timestamp | Not implemented (`lineup_state=UNKNOWN`) |
 
@@ -23,4 +23,4 @@ All parsers have `*_checked` variants that return records, per-record rejections
 **These checks have only been exercised against source-format fixtures. No live payload has been validated. The field names flagged VERIFY must be confirmed against live data.**
 
 ## Network note
-The earlier 403 network blocker is resolved for `api-web.nhle.com` and listed `moneypuck.com` downloads. Live odds and goalie capture require provider access not present in this environment.
+The earlier network blocker is resolved for NHL, MoneyPuck and `api.owlsinsight.com`. The remaining immediate inputs are verified per-book settlement conventions and an authorized timestamped starting-goalie source.
