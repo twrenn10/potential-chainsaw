@@ -145,12 +145,10 @@ def cmd_capture_provider(a, kind: str):
 
         raw = RawSnapshotStore(a.store)
         state, _ = replay(raw, data_origin="LIVE")
-        verified = set()
-        if a.settlement_file:
-            rows = json.loads(Path(a.settlement_file).read_text(encoding="utf-8"))
-            verified = {(str(x["book"]).lower(), str(x["market"])) for x in rows if x.get("verified") is True}
+        from nhl.market.settlement import SettlementRegistry
+        registry = SettlementRegistry.load(a.settlement_file) if a.settlement_file else SettlementRegistry()
         original, derived, rejected = capture_and_normalize_live(
-            OwlsInsightClient(raw), list(state.latest_games().values()), verified)
+            OwlsInsightClient(raw), list(state.latest_games().values()), settlement_registry=registry)
         from collections import Counter
         counts = Counter(reason.split(":", 1)[0] for reason in rejected)
         return _print({"raw_snapshot_id": original.snapshot_id, "normalized_snapshot_id": derived.snapshot_id,
@@ -180,6 +178,57 @@ def cmd_capture_owls_history(a):
             "eventId": a.event_id, "book": a.book, "market": a.market, "side": a.side, "hours": a.hours,
         }))
     return _print([{"snapshot_id": e.snapshot_id, "key": e.key, "n_bytes": e.n_bytes} for e in entries])
+
+
+def cmd_capture_bulk_history(a):
+    from nhl.data.snapshots import RawSnapshotStore
+    from nhl.market.owls import OwlsInsightClient
+    from nhl.market.owls_history import capture_bulk_history
+
+    raw = RawSnapshotStore(a.store)
+    maps = list(raw.entries("owls_event_map"))
+    event_map = raw.get_json(max(maps, key=lambda e: e.fetched_at)).get("event_map", {}) if maps else {}
+    manifest, entry = capture_bulk_history(OwlsInsightClient(raw), a.league, a.start_date, a.end_date,
+                                           max_pages=a.max_pages, max_records=a.max_records,
+                                           event_map=event_map)
+    return _print({"manifest_snapshot_id": entry.snapshot_id, "run_id": manifest["run_id"],
+                   "completeness_status": manifest["completeness_status"],
+                   "pages_completed": manifest["pages_completed"],
+                   "records_received": manifest["records_received"]})
+
+
+def cmd_reconcile_provider_close(a):
+    from nhl.data.ingest import replay
+    from nhl.data.snapshots import RawSnapshotStore
+    from nhl.ledger.closes import CloseStore
+    from nhl.market.reconciliation import (internal_close_legs, provider_close_legs,
+                                           reconcile_provider_closes, reconciliation_csv)
+    from nhl.market.settlement import SettlementRegistry
+
+    raw = RawSnapshotStore(a.store)
+    close_entries = [e for e in raw.entries("odds") if e.key.startswith("owls/api_v1_history_closing-odds")]
+    map_entries = list(raw.entries("owls_event_map"))
+    if not close_entries or not map_entries:
+        raise SystemExit("reconciliation requires captured Owls closing odds and an Owls event map")
+    provider_entry = max(close_entries, key=lambda e: e.fetched_at)
+    map_entry = max(map_entries, key=lambda e: e.fetched_at)
+    provider_rows = raw.get_json(provider_entry).get("data", {}).get("odds")
+    if not isinstance(provider_rows, list):
+        raise SystemExit("latest Owls closing payload is malformed")
+    mapping = raw.get_json(map_entry).get("event_map", {})
+    state, _ = replay(raw, data_origin="LIVE")
+    starts = {gid: g.start_time for gid, g in state.latest_games().items()}
+    registry = SettlementRegistry.load(a.settlement_file) if a.settlement_file else SettlementRegistry()
+    internal = internal_close_legs(CloseStore(Path(a.forward_root) / "closes.sqlite").rows())
+    provider = provider_close_legs(provider_rows, provider_entry.snapshot_id)
+    rows, summary = reconcile_provider_closes(internal, provider, mapping, starts, registry,
+                                               provider_entry.fetched_at, provider_entry.snapshot_id)
+    target = Path(a.out); target.mkdir(parents=True, exist_ok=True)
+    csv_path = target / "CLOSE_RECONCILIATION.csv"
+    summary_path = target / "CLOSE_RECONCILIATION_summary.json"
+    csv_path.write_bytes(reconciliation_csv(rows))
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return _print({"rows": len(rows), "csv": str(csv_path), "summary": str(summary_path), **summary})
 
 
 def cmd_record_goalie_report(a):
@@ -461,6 +510,14 @@ def main(argv: list[str] | None = None) -> int:
         (("--event-id",), {"default": None}), (("--book",), {"default": None}),
         (("--market",), {"default": None}), (("--side",), {"default": None}),
         (("--hours",), {"type": int, "default": 168}))
+    add("capture-history", cmd_capture_bulk_history, "bounded raw-first Owls historical audit capture", store,
+        (("--provider",), {"choices": ["owls"], "default": "owls"}),
+        (("--league",), {"default": "NHL"}), (("--start-date",), {"required": True}),
+        (("--end-date",), {"required": True}), (("--max-pages",), {"type": int, "default": 100}),
+        (("--max-records",), {"type": int, "default": 50000}))
+    add("reconcile-provider-close", cmd_reconcile_provider_close, "audit close-v1 against Owls provider closes",
+        store, fwd, out, (("--provider",), {"choices": ["owls"], "default": "owls"}),
+        (("--settlement-file",), {"default": None}))
     add("record-goalie-report", cmd_record_goalie_report, "record a timestamped operator goalie report", store,
         (("--game-id",), {"required": True}), (("--team",), {"required": True}),
         (("--goalie-id",), {"required": True}),

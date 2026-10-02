@@ -24,6 +24,7 @@ from nhl.data.snapshots import RawSnapshotStore, SnapshotEntry
 from nhl.timeutil import utcnow
 from nhl.timeutil import fmt_ts, parse_ts
 from nhl.data.odds import MARKET_COLUMNS
+from nhl.market.settlement import SettlementRegistry
 
 
 BASE_URL = "https://api.owlsinsight.com"
@@ -208,6 +209,7 @@ def normalize_live_board(
     event_map: Mapping[str, str],
     *,
     verified_settlement: set[tuple[str, str]] | None = None,
+    settlement_registry: SettlementRegistry | None = None,
 ) -> tuple[bytes, list[str]]:
     """Normalize verified main lines from a captured live board to market-v2.
 
@@ -244,8 +246,12 @@ def normalize_live_board(
                     if canonical is None:
                         rejected.append(f"UNKNOWN_MARKET:{actual_book}:{raw_market}")
                         continue
-                    if (actual_book, raw_market) not in verified_settlement:
-                        rejected.append(f"UNVERIFIED_SETTLEMENT:{actual_book}:{raw_market}")
+                    legacy_verified = (actual_book, raw_market) in verified_settlement
+                    decision = settlement_registry.decision("owls", actual_book, "NHL", canonical, fetched_at) \
+                        if settlement_registry else None
+                    if not legacy_verified and not (decision and decision.compatible):
+                        reason = decision.reason if decision else "UNVERIFIED_SETTLEMENT"
+                        rejected.append(f"{reason}:{actual_book}:{raw_market}")
                         continue
                     source_ts_raw = market.get("last_update") or bookmaker.get("last_update")
                     try:
@@ -309,6 +315,7 @@ def capture_and_normalize_live(
     client: OwlsInsightClient,
     games: list[object],
     verified_settlement: set[tuple[str, str]] | None = None,
+    settlement_registry: SettlementRegistry | None = None,
 ) -> tuple[SnapshotEntry, SnapshotEntry, list[str]]:
     raw_entry = client.capture("/api/v1/nhl/odds")
     body = client.store.get_bytes(raw_entry)
@@ -317,7 +324,8 @@ def capture_and_normalize_live(
     map_entry = client.store.put("owls_event_map", raw_entry.key, map_payload, raw_entry.fetched_at,
                                  {"provider": "owls", "derived_from": raw_entry.snapshot_id})
     normalized, parse_rejections = normalize_live_board(body, raw_entry.fetched_at, event_map,
-                                                         verified_settlement=verified_settlement)
+                                                         verified_settlement=verified_settlement,
+                                                         settlement_registry=settlement_registry)
     derived = client.store.put("odds", "owls-normalized/" + raw_entry.fetched_at.date().isoformat(), normalized,
                                raw_entry.fetched_at, {"provider": "owls", "contract": "market-v2",
                                "derived_from": raw_entry.snapshot_id, "event_map": map_entry.snapshot_id,
