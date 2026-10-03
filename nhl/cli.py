@@ -131,7 +131,10 @@ def cmd_scheduler_plan(a):
 
     day = date.fromisoformat(a.date)
     store, _ = replay(RawSnapshotStore(a.store), data_origin="LIVE")
-    drops = [g.start_time for g in store.latest_games().values() if g.start_time.astimezone().date() == day]
+    from zoneinfo import ZoneInfo
+
+    et = ZoneInfo("America/New_York")  # slate days are US/Eastern everywhere (machine timezone must not matter)
+    drops = [g.start_time for g in store.latest_games().values() if g.start_time.astimezone(et).date() == day]
     return _print([{"due_at": x.due_at, "action": x.action, "reason": x.reason} for x in build_plan(drops, load("live_scheduler"))])
 
 

@@ -24,7 +24,7 @@ from typing import Protocol
 
 from nhl.data.snapshots import RawSnapshotStore, SnapshotEntry
 from nhl.timeutil import utcnow
-from nhl.timeutil import fmt_ts, parse_ts
+from nhl.timeutil import fmt_ts
 from nhl.contracts import canonical_team
 from nhl.data.odds import MARKET_COLUMNS
 

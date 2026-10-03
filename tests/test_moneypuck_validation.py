@@ -65,3 +65,28 @@ def test_goalie_goals_exceeding_shots_rejected(fixtures):
     csv = (fixtures / "moneypuck_goalies.csv").read_text().replace("2.6,2,29", "2.6,19,18")
     res = moneypuck.parse_goalie_games_checked(csv.encode())
     assert any("goals > shots" in r.reason for r in res.rejections)
+
+
+def test_non_causal_moneypuck_does_not_hide_causal_boxscore_starts(fixtures):
+    """A VINTAGE_UNVERIFIED MoneyPuck row merged with a causal boxscore row must not make
+    the starter fact invisible to strict views."""
+
+    import json
+
+    from nhl.data import nhl_api
+    from nhl.data.pit import HistoricalStore
+
+    box_payload = json.loads((fixtures / "nhl_boxscore.json").read_text())
+    box_payload["id"] = 2025020010
+    box = nhl_api.parse_boxscore_goalies_checked(
+        box_payload, parse_ts("2025-10-10T23:00:00Z"),
+        SnapshotEntry("nhl_api:b", "nhl_api", "boxscore/2025020010", parse_ts("2025-10-11T03:30:00Z"), "b", 1, {}),
+    ).records
+    mp_csv = (fixtures / "moneypuck_goalies.csv").read_text().replace("8479361", "8479361").encode()
+    mp = moneypuck.parse_goalie_games(mp_csv, entry=entry("2026-09-30T00:00:00Z"), attestations=[])
+    assert all(not g.provenance.causal for g in mp)
+    merged = moneypuck.merge_goalie_sources(mp, box)
+    store = HistoricalStore(goalie_stats=merged, data_origin="HISTORICAL")
+    visible = store.view("2026-01-01T00:00:00Z").goalie_stats()
+    starters = {g.goalie_id for g in visible if g.started}
+    assert {"8479361", "8478470"} <= starters

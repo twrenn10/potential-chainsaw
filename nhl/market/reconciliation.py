@@ -6,7 +6,7 @@ import csv
 import io
 import json
 from hashlib import sha256
-from typing import Any, Mapping
+from typing import Mapping
 
 from nhl.market.settlement import SettlementRegistry
 from nhl.timeutil import fmt_ts, parse_ts

@@ -306,9 +306,14 @@ def parse_goalie_games(payload: bytes, entry: SnapshotEntry | None = None, attes
 
 
 def merge_goalie_sources(moneypuck: list[GoalieGameStats], boxscore: list[GoalieGameStats]) -> list[GoalieGameStats]:
-    """Boxscore owns ``started`` (an event fact); MoneyPuck owns ``xg_against``. The merged
-    record keeps the MoneyPuck provenance (its xG decides causality) and the later
-    availability of the two."""
+    """Boxscore owns ``started`` (an event fact); MoneyPuck owns ``xg_against``.
+
+    The merged record keeps the MoneyPuck provenance (its xG decides causality) and the
+    later availability of the two -- but ONLY when the MoneyPuck row is causal. A
+    non-causal MoneyPuck row (e.g. VINTAGE_UNVERIFIED) must not taint the boxscore's
+    causal starter/shots/goals facts: the boxscore record is kept unchanged (xG stays
+    unknown) so strict views still see who started.
+    """
 
     box = {(g.game_id, g.goalie_id): g for g in boxscore}
     out = []
@@ -316,6 +321,9 @@ def merge_goalie_sources(moneypuck: list[GoalieGameStats], boxscore: list[Goalie
         b = box.get((g.game_id, g.goalie_id))
         if b is None:
             out.append(g)
+            continue
+        if g.provenance is not None and not g.provenance.causal and (b.provenance is None or b.provenance.causal):
+            out.append(b)
             continue
         out.append(replace(g, started=b.started, available_at=max(g.available_at, b.available_at)))
     return out
